@@ -1,0 +1,1530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Trial Reels">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Trial Reels Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a single 600px phone-style column, sticky top bar, profile header over a 3-column reel grid, bottom tab bar, bottom sheets for detail. */
+:root {
+  --bg: #ffffff; --fg: #0c1014; --muted: #737373; --line: #dbdbdb; --soft: #efefef; --sheet: #ffffff;
+  --accent: #1a8cff; --accent-fg: #ffffff; --danger: #e5484d; --ok: #2a9d58; --warn: #c27c0e; --star: #f2a900;
+  --scrim: rgba(0, 0, 0, .5); --tile-shade: rgba(0, 0, 0, .55);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #000000; --fg: #f5f5f5; --muted: #a8a8a8; --line: #2a2a2a; --soft: #262626; --sheet: #181818;
+  --accent: #3d9dff; --accent-fg: #ffffff; --danger: #ff6b6f; --ok: #4cc27a; --warn: #e3a43b; --star: #ffc93d;
+  --scrim: rgba(0, 0, 0, .65); --tile-shade: rgba(0, 0, 0, .6); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #000000; --fg: #f5f5f5; --muted: #a8a8a8; --line: #2a2a2a; --soft: #262626; --sheet: #181818;
+  --accent: #3d9dff; --accent-fg: #ffffff; --danger: #ff6b6f; --ok: #4cc27a; --warn: #e3a43b; --star: #ffc93d;
+  --scrim: rgba(0, 0, 0, .65); --tile-shade: rgba(0, 0, 0, .6); color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 14px/1.4 var(--font); -webkit-font-smoothing: antialiased }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg) }
+button, input, textarea, select { font: inherit; color: inherit }
+button { cursor: pointer }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+a { color: var(--accent); text-decoration: none }
+svg { display: block }
+
+.app { max-width: 600px; margin: 0 auto; min-height: 100vh; padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)) }
+.gut { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bg); display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; border-bottom: 1px solid var(--line) }
+.top h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -.2px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.iconbtn { border: 0; background: none; padding: 6px; border-radius: 50%; display: grid; place-items: center }
+.iconbtn:disabled { opacity: .5; cursor: default }
+.spin { animation: spin 1s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none } .sheet { transition: none !important } }
+
+.jobbar { font-size: 12px; color: var(--muted); padding-block: 8px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none }
+.demo { background: var(--soft); font-size: 12px; padding-block: 8px; color: var(--muted) }
+
+/* profile */
+.prof { display: grid; grid-template-columns: auto 1fr; gap: 24px; align-items: center; padding-block: 16px 8px }
+.avatar { width: 84px; height: 84px; border-radius: 50%; background: var(--soft) center/cover; display: grid; place-items: center; font-size: 30px; font-weight: 600; color: var(--muted); border: 1px solid var(--line) }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; gap: 4px }
+.stats b { display: block; font-size: 17px; font-variant-numeric: tabular-nums }
+.stats span { font-size: 13px }
+.name { font-weight: 600; padding-block: 2px 12px }
+
+.panel { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; margin-bottom: 14px }
+.panel .txt { flex: 1; min-width: 0 }
+.panel .t { font-weight: 600 }
+.panel .s { color: var(--muted); font-size: 13px }
+
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line) }
+.tab { border: 0; background: none; padding: 11px 0 10px; display: flex; justify-content: center; align-items: center; gap: 6px; color: var(--muted); border-top: 1px solid transparent; margin-top: -1px; font-size: 12px; font-weight: 600; letter-spacing: .3px }
+.tab[aria-selected="true"] { color: var(--fg); border-top-color: var(--fg) }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px }
+.tile { position: relative; aspect-ratio: 3 / 4; max-width: 100%; border: 0; padding: 0; background: var(--soft) center/cover no-repeat; overflow: hidden; color: #fff; text-align: left }
+.tile .ph { position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; font-size: 12px; font-weight: 600; text-align: center; line-height: 1.25; text-shadow: 0 1px 2px rgba(0,0,0,.35) }
+.tile .views { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 3px; align-items: center; font-size: 12px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,.6); font-variant-numeric: tabular-nums }
+.tile .badges { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; justify-content: space-between; gap: 4px }
+.pill { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: var(--tile-shade); color: #fff; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap }
+.pill.star { color: var(--star) }
+.pill.next { background: var(--accent); color: var(--accent-fg) }
+.tile.off::after { content: ""; position: absolute; inset: 0; background: var(--scrim) }
+.tile .officon { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1 }
+
+.empty { text-align: center; padding: 48px 24px; color: var(--muted) }
+.empty h2 { color: var(--fg); font-size: 20px; margin: 12px 0 6px }
+
+/* lists */
+.sec { font-size: 13px; font-weight: 600; color: var(--muted); padding-block: 22px 8px; letter-spacing: .2px }
+.list { display: grid }
+.row { display: flex; align-items: center; gap: 12px; padding-block: 10px; border-bottom: 1px solid var(--line); min-height: 52px }
+.row:last-child { border-bottom: 0 }
+.row .txt { flex: 1; min-width: 0 }
+.row .t { font-size: 15px }
+.row .s { color: var(--muted); font-size: 13px; overflow-wrap: anywhere }
+.thumb { width: 44px; height: 58px; border-radius: 6px; background: var(--soft) center/cover; flex: none; position: relative; overflow: hidden }
+.qtime { font-weight: 600; font-variant-numeric: tabular-nums }
+
+.switch { position: relative; width: 50px; height: 30px; flex: none }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1 }
+.switch span { position: absolute; inset: 0; border-radius: 99px; background: var(--line); transition: background .2s }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s }
+.switch input:checked + span { background: var(--accent) }
+.switch input:checked + span::after { transform: translateX(20px) }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px }
+
+.stepper { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; flex: none }
+.stepper button { border: 0; background: none; width: 36px; height: 34px; display: grid; place-items: center }
+.stepper button:disabled { opacity: .35; cursor: default }
+.stepper output { min-width: 30px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums }
+
+.btn { border: 0; border-radius: 8px; padding: 9px 16px; font-weight: 600; background: var(--soft); color: var(--fg); display: inline-flex; align-items: center; justify-content: center; gap: 6px }
+.btn.primary { background: var(--accent); color: var(--accent-fg) }
+.btn.danger { background: none; color: var(--danger); padding-inline: 0 }
+.btn:disabled { opacity: .5; cursor: default }
+.btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-block: 12px }
+.mini { border: 1px solid var(--line); background: none; border-radius: 8px; width: 34px; height: 34px; display: grid; place-items: center; flex: none }
+.mini:disabled { opacity: .3; cursor: default }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; background: var(--soft); color: var(--fg) }
+.chip.blue { color: var(--accent) } .chip.red { color: var(--danger) } .chip.green { color: var(--ok) } .chip.amber { color: var(--warn) }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding-block: 4px }
+.toggle-chip { border: 1px solid var(--line); background: none; border-radius: 99px; padding: 6px 12px; font-size: 13px; font-weight: 600; color: var(--muted) }
+.toggle-chip[aria-pressed="true"] { border-color: var(--fg); color: var(--fg) }
+
+input.field, textarea.field, select.field { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: var(--bg) }
+textarea.field { min-height: 84px; resize: vertical }
+input[type="time"].field { width: auto }
+.note { font-size: 12px; color: var(--muted); padding-block: 4px }
+.note.warn { color: var(--warn) }
+.radio { display: flex; gap: 10px; align-items: center; padding-block: 10px; border-bottom: 1px solid var(--line) }
+.radio input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0 }
+.log { font-size: 12px; color: var(--muted); display: grid; gap: 6px; padding-block: 6px }
+.log .err { color: var(--danger) }
+
+/* bottom nav */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--bg); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px) }
+.nav .in { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); height: 52px }
+.nav button { border: 0; background: none; display: grid; place-items: center; color: var(--fg); position: relative }
+.nav .badge { position: absolute; top: 9px; left: calc(50% + 6px); width: 8px; height: 8px; border-radius: 50%; background: var(--danger) }
+
+/* sheet */
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 40; display: flex; align-items: flex-end; justify-content: center }
+.sheet { width: 100%; max-width: 600px; max-height: 88vh; overflow-y: auto; background: var(--sheet); border-radius: 14px 14px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateY(0); transition: transform .22s ease-out }
+.handle { width: 40px; height: 4px; border-radius: 4px; background: var(--line); margin: 8px auto 4px }
+.shead { display: flex; gap: 12px; padding-block: 10px; align-items: flex-start }
+.shead .thumb { width: 72px; height: 96px; border-radius: 8px }
+.shead .meta { flex: 1; min-width: 0 }
+.shead .v { font-weight: 700; font-size: 16px }
+.cap { color: var(--muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere }
+.confirm { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-block: 8px; display: grid; gap: 10px }
+.preview { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; margin-block: 8px }
+.preview video { width: 100%; max-height: 60vh; border-radius: 8px; background: #000 }
+.fakevid { aspect-ratio: 9 / 16; max-height: 50vh; max-width: 100%; margin: 0 auto; border-radius: 8px; display: grid; place-items: center; color: #fff; font-weight: 700; text-align: center; padding: 20px; font-size: 18px }
+.stats4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding-block: 4px 2px }
+.stat { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-width: 0 }
+.stat b { display: block; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.3px }
+.stat span { font-size: 12px; color: var(--muted) }
+.verdict { font-size: 15px; line-height: 1.45; padding-block: 4px 10px }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden }
+.seg button { border: 0; background: none; padding: 5px 12px; font-size: 13px; font-weight: 600; color: var(--muted) }
+.seg button[aria-pressed="true"] { background: var(--soft); color: var(--fg) }
+.signal { display: flex; gap: 10px; align-items: flex-start; padding-block: 8px; border-bottom: 1px solid var(--line) }
+.signal:last-child { border-bottom: 0 }
+.signal i { font-style: normal; font-weight: 700; width: 18px; flex: none; text-align: center }
+.up { color: var(--ok) } .down { color: var(--danger) } .flat { color: var(--muted) }
+.metrics { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums }
+.chart text { font-size: 10px; fill: var(--muted) }
+.toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 600; z-index: 60; max-width: calc(100% - 32px) }
+</style>
+
+<div class="app" id="app"></div>
+<nav class="nav" aria-label="Sections"><div class="in" id="nav"></div></nav>
+<div id="layer"></div>
+<script>
+!function(i){"use strict";var v=function(r){var t,n=new Float64Array(16);if(r)for(t=0;t<r.length;t++)n[t]=r[t];return n},h=function(){throw new Error("no PRNG")},o=new Uint8Array(16),n=new Uint8Array(32);n[0]=9;var s=v(),u=v([1]),p=v([56129,1]),c=v([30883,4953,19914,30187,55467,16705,2637,112,59544,30585,16505,36039,65139,11119,27886,20995]),y=v([61785,9906,39828,60374,45398,33411,5274,224,53552,61171,33010,6542,64743,22239,55772,9222]),e=v([54554,36645,11616,51542,42930,38181,51040,26924,56412,64982,57905,49316,21502,52590,14035,8553]),a=v([26200,26214,26214,26214,26214,26214,26214,26214,26214,26214,26214,26214,26214,26214,26214,26214]),l=v([41136,18958,6951,50414,58488,44335,6150,12099,55207,15867,153,11085,57099,20417,9344,11139]);function f(r,t,n,e){r[t]=n>>24&255,r[t+1]=n>>16&255,r[t+2]=n>>8&255,r[t+3]=255&n,r[t+4]=e>>24&255,r[t+5]=e>>16&255,r[t+6]=e>>8&255,r[t+7]=255&e}function w(r,t,n,e,o){var i,h=0;for(i=0;i<o;i++)h|=r[t+i]^n[e+i];return(1&h-1>>>8)-1}function b(r,t,n,e){return w(r,t,n,e,16)}function g(r,t,n,e){return w(r,t,n,e,32)}function A(r,t,n,e){!function(r,t,n,e){for(var o,i=255&e[0]|(255&e[1])<<8|(255&e[2])<<16|(255&e[3])<<24,h=255&n[0]|(255&n[1])<<8|(255&n[2])<<16|(255&n[3])<<24,a=255&n[4]|(255&n[5])<<8|(255&n[6])<<16|(255&n[7])<<24,f=255&n[8]|(255&n[9])<<8|(255&n[10])<<16|(255&n[11])<<24,s=255&n[12]|(255&n[13])<<8|(255&n[14])<<16|(255&n[15])<<24,u=255&e[4]|(255&e[5])<<8|(255&e[6])<<16|(255&e[7])<<24,c=255&t[0]|(255&t[1])<<8|(255&t[2])<<16|(255&t[3])<<24,y=255&t[4]|(255&t[5])<<8|(255&t[6])<<16|(255&t[7])<<24,l=255&t[8]|(255&t[9])<<8|(255&t[10])<<16|(255&t[11])<<24,w=255&t[12]|(255&t[13])<<8|(255&t[14])<<16|(255&t[15])<<24,v=255&e[8]|(255&e[9])<<8|(255&e[10])<<16|(255&e[11])<<24,p=255&n[16]|(255&n[17])<<8|(255&n[18])<<16|(255&n[19])<<24,b=255&n[20]|(255&n[21])<<8|(255&n[22])<<16|(255&n[23])<<24,g=255&n[24]|(255&n[25])<<8|(255&n[26])<<16|(255&n[27])<<24,A=255&n[28]|(255&n[29])<<8|(255&n[30])<<16|(255&n[31])<<24,_=255&e[12]|(255&e[13])<<8|(255&e[14])<<16|(255&e[15])<<24,U=i,d=h,E=a,x=f,M=s,m=u,B=c,S=y,k=l,K=w,Y=v,L=p,T=b,z=g,R=A,P=_,N=0;N<20;N+=2)U^=(o=(T^=(o=(k^=(o=(M^=(o=U+T|0)<<7|o>>>25)+U|0)<<9|o>>>23)+M|0)<<13|o>>>19)+k|0)<<18|o>>>14,m^=(o=(d^=(o=(z^=(o=(K^=(o=m+d|0)<<7|o>>>25)+m|0)<<9|o>>>23)+K|0)<<13|o>>>19)+z|0)<<18|o>>>14,Y^=(o=(B^=(o=(E^=(o=(R^=(o=Y+B|0)<<7|o>>>25)+Y|0)<<9|o>>>23)+R|0)<<13|o>>>19)+E|0)<<18|o>>>14,P^=(o=(L^=(o=(S^=(o=(x^=(o=P+L|0)<<7|o>>>25)+P|0)<<9|o>>>23)+x|0)<<13|o>>>19)+S|0)<<18|o>>>14,U^=(o=(x^=(o=(E^=(o=(d^=(o=U+x|0)<<7|o>>>25)+U|0)<<9|o>>>23)+d|0)<<13|o>>>19)+E|0)<<18|o>>>14,m^=(o=(M^=(o=(S^=(o=(B^=(o=m+M|0)<<7|o>>>25)+m|0)<<9|o>>>23)+B|0)<<13|o>>>19)+S|0)<<18|o>>>14,Y^=(o=(K^=(o=(k^=(o=(L^=(o=Y+K|0)<<7|o>>>25)+Y|0)<<9|o>>>23)+L|0)<<13|o>>>19)+k|0)<<18|o>>>14,P^=(o=(R^=(o=(z^=(o=(T^=(o=P+R|0)<<7|o>>>25)+P|0)<<9|o>>>23)+T|0)<<13|o>>>19)+z|0)<<18|o>>>14;U=U+i|0,d=d+h|0,E=E+a|0,x=x+f|0,M=M+s|0,m=m+u|0,B=B+c|0,S=S+y|0,k=k+l|0,K=K+w|0,Y=Y+v|0,L=L+p|0,T=T+b|0,z=z+g|0,R=R+A|0,P=P+_|0,r[0]=U>>>0&255,r[1]=U>>>8&255,r[2]=U>>>16&255,r[3]=U>>>24&255,r[4]=d>>>0&255,r[5]=d>>>8&255,r[6]=d>>>16&255,r[7]=d>>>24&255,r[8]=E>>>0&255,r[9]=E>>>8&255,r[10]=E>>>16&255,r[11]=E>>>24&255,r[12]=x>>>0&255,r[13]=x>>>8&255,r[14]=x>>>16&255,r[15]=x>>>24&255,r[16]=M>>>0&255,r[17]=M>>>8&255,r[18]=M>>>16&255,r[19]=M>>>24&255,r[20]=m>>>0&255,r[21]=m>>>8&255,r[22]=m>>>16&255,r[23]=m>>>24&255,r[24]=B>>>0&255,r[25]=B>>>8&255,r[26]=B>>>16&255,r[27]=B>>>24&255,r[28]=S>>>0&255,r[29]=S>>>8&255,r[30]=S>>>16&255,r[31]=S>>>24&255,r[32]=k>>>0&255,r[33]=k>>>8&255,r[34]=k>>>16&255,r[35]=k>>>24&255,r[36]=K>>>0&255,r[37]=K>>>8&255,r[38]=K>>>16&255,r[39]=K>>>24&255,r[40]=Y>>>0&255,r[41]=Y>>>8&255,r[42]=Y>>>16&255,r[43]=Y>>>24&255,r[44]=L>>>0&255,r[45]=L>>>8&255,r[46]=L>>>16&255,r[47]=L>>>24&255,r[48]=T>>>0&255,r[49]=T>>>8&255,r[50]=T>>>16&255,r[51]=T>>>24&255,r[52]=z>>>0&255,r[53]=z>>>8&255,r[54]=z>>>16&255,r[55]=z>>>24&255,r[56]=R>>>0&255,r[57]=R>>>8&255,r[58]=R>>>16&255,r[59]=R>>>24&255,r[60]=P>>>0&255,r[61]=P>>>8&255,r[62]=P>>>16&255,r[63]=P>>>24&255}(r,t,n,e)}function _(r,t,n,e){!function(r,t,n,e){for(var o,i=255&e[0]|(255&e[1])<<8|(255&e[2])<<16|(255&e[3])<<24,h=255&n[0]|(255&n[1])<<8|(255&n[2])<<16|(255&n[3])<<24,a=255&n[4]|(255&n[5])<<8|(255&n[6])<<16|(255&n[7])<<24,f=255&n[8]|(255&n[9])<<8|(255&n[10])<<16|(255&n[11])<<24,s=255&n[12]|(255&n[13])<<8|(255&n[14])<<16|(255&n[15])<<24,u=255&e[4]|(255&e[5])<<8|(255&e[6])<<16|(255&e[7])<<24,c=255&t[0]|(255&t[1])<<8|(255&t[2])<<16|(255&t[3])<<24,y=255&t[4]|(255&t[5])<<8|(255&t[6])<<16|(255&t[7])<<24,l=255&t[8]|(255&t[9])<<8|(255&t[10])<<16|(255&t[11])<<24,w=255&t[12]|(255&t[13])<<8|(255&t[14])<<16|(255&t[15])<<24,v=255&e[8]|(255&e[9])<<8|(255&e[10])<<16|(255&e[11])<<24,p=255&n[16]|(255&n[17])<<8|(255&n[18])<<16|(255&n[19])<<24,b=255&n[20]|(255&n[21])<<8|(255&n[22])<<16|(255&n[23])<<24,g=255&n[24]|(255&n[25])<<8|(255&n[26])<<16|(255&n[27])<<24,A=255&n[28]|(255&n[29])<<8|(255&n[30])<<16|(255&n[31])<<24,_=255&e[12]|(255&e[13])<<8|(255&e[14])<<16|(255&e[15])<<24,U=0;U<20;U+=2)i^=(o=(b^=(o=(l^=(o=(s^=(o=i+b|0)<<7|o>>>25)+i|0)<<9|o>>>23)+s|0)<<13|o>>>19)+l|0)<<18|o>>>14,u^=(o=(h^=(o=(g^=(o=(w^=(o=u+h|0)<<7|o>>>25)+u|0)<<9|o>>>23)+w|0)<<13|o>>>19)+g|0)<<18|o>>>14,v^=(o=(c^=(o=(a^=(o=(A^=(o=v+c|0)<<7|o>>>25)+v|0)<<9|o>>>23)+A|0)<<13|o>>>19)+a|0)<<18|o>>>14,_^=(o=(p^=(o=(y^=(o=(f^=(o=_+p|0)<<7|o>>>25)+_|0)<<9|o>>>23)+f|0)<<13|o>>>19)+y|0)<<18|o>>>14,i^=(o=(f^=(o=(a^=(o=(h^=(o=i+f|0)<<7|o>>>25)+i|0)<<9|o>>>23)+h|0)<<13|o>>>19)+a|0)<<18|o>>>14,u^=(o=(s^=(o=(y^=(o=(c^=(o=u+s|0)<<7|o>>>25)+u|0)<<9|o>>>23)+c|0)<<13|o>>>19)+y|0)<<18|o>>>14,v^=(o=(w^=(o=(l^=(o=(p^=(o=v+w|0)<<7|o>>>25)+v|0)<<9|o>>>23)+p|0)<<13|o>>>19)+l|0)<<18|o>>>14,_^=(o=(A^=(o=(g^=(o=(b^=(o=_+A|0)<<7|o>>>25)+_|0)<<9|o>>>23)+b|0)<<13|o>>>19)+g|0)<<18|o>>>14;r[0]=i>>>0&255,r[1]=i>>>8&255,r[2]=i>>>16&255,r[3]=i>>>24&255,r[4]=u>>>0&255,r[5]=u>>>8&255,r[6]=u>>>16&255,r[7]=u>>>24&255,r[8]=v>>>0&255,r[9]=v>>>8&255,r[10]=v>>>16&255,r[11]=v>>>24&255,r[12]=_>>>0&255,r[13]=_>>>8&255,r[14]=_>>>16&255,r[15]=_>>>24&255,r[16]=c>>>0&255,r[17]=c>>>8&255,r[18]=c>>>16&255,r[19]=c>>>24&255,r[20]=y>>>0&255,r[21]=y>>>8&255,r[22]=y>>>16&255,r[23]=y>>>24&255,r[24]=l>>>0&255,r[25]=l>>>8&255,r[26]=l>>>16&255,r[27]=l>>>24&255,r[28]=w>>>0&255,r[29]=w>>>8&255,r[30]=w>>>16&255,r[31]=w>>>24&255}(r,t,n,e)}var U=new Uint8Array([101,120,112,97,110,100,32,51,50,45,98,121,116,101,32,107]);function d(r,t,n,e,o,i,h){var a,f,s=new Uint8Array(16),u=new Uint8Array(64);for(f=0;f<16;f++)s[f]=0;for(f=0;f<8;f++)s[f]=i[f];for(;64<=o;){for(A(u,s,h,U),f=0;f<64;f++)r[t+f]=n[e+f]^u[f];for(a=1,f=8;f<16;f++)a=a+(255&s[f])|0,s[f]=255&a,a>>>=8;o-=64,t+=64,e+=64}if(0<o)for(A(u,s,h,U),f=0;f<o;f++)r[t+f]=n[e+f]^u[f];return 0}function E(r,t,n,e,o){var i,h,a=new Uint8Array(16),f=new Uint8Array(64);for(h=0;h<16;h++)a[h]=0;for(h=0;h<8;h++)a[h]=e[h];for(;64<=n;){for(A(f,a,o,U),h=0;h<64;h++)r[t+h]=f[h];for(i=1,h=8;h<16;h++)i=i+(255&a[h])|0,a[h]=255&i,i>>>=8;n-=64,t+=64}if(0<n)for(A(f,a,o,U),h=0;h<n;h++)r[t+h]=f[h];return 0}function x(r,t,n,e,o){var i=new Uint8Array(32);_(i,e,o,U);for(var h=new Uint8Array(8),a=0;a<8;a++)h[a]=e[a+16];return E(r,t,n,h,i)}function M(r,t,n,e,o,i,h){var a=new Uint8Array(32);_(a,i,h,U);for(var f=new Uint8Array(8),s=0;s<8;s++)f[s]=i[s+16];return d(r,t,n,e,o,f,a)}var m=function(r){var t,n,e,o,i,h,a,f;this.buffer=new Uint8Array(16),this.r=new Uint16Array(10),this.h=new Uint16Array(10),this.pad=new Uint16Array(8),this.leftover=0,t=255&r[this.fin=0]|(255&r[1])<<8,this.r[0]=8191&t,n=255&r[2]|(255&r[3])<<8,this.r[1]=8191&(t>>>13|n<<3),e=255&r[4]|(255&r[5])<<8,this.r[2]=7939&(n>>>10|e<<6),o=255&r[6]|(255&r[7])<<8,this.r[3]=8191&(e>>>7|o<<9),i=255&r[8]|(255&r[9])<<8,this.r[4]=255&(o>>>4|i<<12),this.r[5]=i>>>1&8190,h=255&r[10]|(255&r[11])<<8,this.r[6]=8191&(i>>>14|h<<2),a=255&r[12]|(255&r[13])<<8,this.r[7]=8065&(h>>>11|a<<5),f=255&r[14]|(255&r[15])<<8,this.r[8]=8191&(a>>>8|f<<8),this.r[9]=f>>>5&127,this.pad[0]=255&r[16]|(255&r[17])<<8,this.pad[1]=255&r[18]|(255&r[19])<<8,this.pad[2]=255&r[20]|(255&r[21])<<8,this.pad[3]=255&r[22]|(255&r[23])<<8,this.pad[4]=255&r[24]|(255&r[25])<<8,this.pad[5]=255&r[26]|(255&r[27])<<8,this.pad[6]=255&r[28]|(255&r[29])<<8,this.pad[7]=255&r[30]|(255&r[31])<<8};function B(r,t,n,e,o,i){var h=new m(i);return h.update(n,e,o),h.finish(r,t),0}function S(r,t,n,e,o,i){var h=new Uint8Array(16);return B(h,0,n,e,o,i),b(r,t,h,0)}function k(r,t,n,e,o){var i;if(n<32)return-1;for(M(r,0,t,0,n,e,o),B(r,16,r,32,n-32,r),i=0;i<16;i++)r[i]=0;return 0}function K(r,t,n,e,o){var i,h=new Uint8Array(32);if(n<32)return-1;if(x(h,0,32,e,o),0!==S(t,16,t,32,n-32,h))return-1;for(M(r,0,t,0,n,e,o),i=0;i<32;i++)r[i]=0;return 0}function Y(r,t){var n;for(n=0;n<16;n++)r[n]=0|t[n]}function L(r){var t,n,e=1;for(t=0;t<16;t++)n=r[t]+e+65535,e=Math.floor(n/65536),r[t]=n-65536*e;r[0]+=e-1+37*(e-1)}function T(r,t,n){for(var e,o=~(n-1),i=0;i<16;i++)e=o&(r[i]^t[i]),r[i]^=e,t[i]^=e}function z(r,t){var n,e,o,i=v(),h=v();for(n=0;n<16;n++)h[n]=t[n];for(L(h),L(h),L(h),e=0;e<2;e++){for(i[0]=h[0]-65517,n=1;n<15;n++)i[n]=h[n]-65535-(i[n-1]>>16&1),i[n-1]&=65535;i[15]=h[15]-32767-(i[14]>>16&1),o=i[15]>>16&1,i[14]&=65535,T(h,i,1-o)}for(n=0;n<16;n++)r[2*n]=255&h[n],r[2*n+1]=h[n]>>8}function R(r,t){var n=new Uint8Array(32),e=new Uint8Array(32);return z(n,r),z(e,t),g(n,0,e,0)}function P(r){var t=new Uint8Array(32);return z(t,r),1&t[0]}function N(r,t){var n;for(n=0;n<16;n++)r[n]=t[2*n]+(t[2*n+1]<<8);r[15]&=32767}function O(r,t,n){for(var e=0;e<16;e++)r[e]=t[e]+n[e]}function C(r,t,n){for(var e=0;e<16;e++)r[e]=t[e]-n[e]}function F(r,t,n){var e,o,i=0,h=0,a=0,f=0,s=0,u=0,c=0,y=0,l=0,w=0,v=0,p=0,b=0,g=0,A=0,_=0,U=0,d=0,E=0,x=0,M=0,m=0,B=0,S=0,k=0,K=0,Y=0,L=0,T=0,z=0,R=0,P=n[0],N=n[1],O=n[2],C=n[3],F=n[4],I=n[5],Z=n[6],G=n[7],q=n[8],D=n[9],V=n[10],X=n[11],j=n[12],H=n[13],J=n[14],Q=n[15];i+=(e=t[0])*P,h+=e*N,a+=e*O,f+=e*C,s+=e*F,u+=e*I,c+=e*Z,y+=e*G,l+=e*q,w+=e*D,v+=e*V,p+=e*X,b+=e*j,g+=e*H,A+=e*J,_+=e*Q,h+=(e=t[1])*P,a+=e*N,f+=e*O,s+=e*C,u+=e*F,c+=e*I,y+=e*Z,l+=e*G,w+=e*q,v+=e*D,p+=e*V,b+=e*X,g+=e*j,A+=e*H,_+=e*J,U+=e*Q,a+=(e=t[2])*P,f+=e*N,s+=e*O,u+=e*C,c+=e*F,y+=e*I,l+=e*Z,w+=e*G,v+=e*q,p+=e*D,b+=e*V,g+=e*X,A+=e*j,_+=e*H,U+=e*J,d+=e*Q,f+=(e=t[3])*P,s+=e*N,u+=e*O,c+=e*C,y+=e*F,l+=e*I,w+=e*Z,v+=e*G,p+=e*q,b+=e*D,g+=e*V,A+=e*X,_+=e*j,U+=e*H,d+=e*J,E+=e*Q,s+=(e=t[4])*P,u+=e*N,c+=e*O,y+=e*C,l+=e*F,w+=e*I,v+=e*Z,p+=e*G,b+=e*q,g+=e*D,A+=e*V,_+=e*X,U+=e*j,d+=e*H,E+=e*J,x+=e*Q,u+=(e=t[5])*P,c+=e*N,y+=e*O,l+=e*C,w+=e*F,v+=e*I,p+=e*Z,b+=e*G,g+=e*q,A+=e*D,_+=e*V,U+=e*X,d+=e*j,E+=e*H,x+=e*J,M+=e*Q,c+=(e=t[6])*P,y+=e*N,l+=e*O,w+=e*C,v+=e*F,p+=e*I,b+=e*Z,g+=e*G,A+=e*q,_+=e*D,U+=e*V,d+=e*X,E+=e*j,x+=e*H,M+=e*J,m+=e*Q,y+=(e=t[7])*P,l+=e*N,w+=e*O,v+=e*C,p+=e*F,b+=e*I,g+=e*Z,A+=e*G,_+=e*q,U+=e*D,d+=e*V,E+=e*X,x+=e*j,M+=e*H,m+=e*J,B+=e*Q,l+=(e=t[8])*P,w+=e*N,v+=e*O,p+=e*C,b+=e*F,g+=e*I,A+=e*Z,_+=e*G,U+=e*q,d+=e*D,E+=e*V,x+=e*X,M+=e*j,m+=e*H,B+=e*J,S+=e*Q,w+=(e=t[9])*P,v+=e*N,p+=e*O,b+=e*C,g+=e*F,A+=e*I,_+=e*Z,U+=e*G,d+=e*q,E+=e*D,x+=e*V,M+=e*X,m+=e*j,B+=e*H,S+=e*J,k+=e*Q,v+=(e=t[10])*P,p+=e*N,b+=e*O,g+=e*C,A+=e*F,_+=e*I,U+=e*Z,d+=e*G,E+=e*q,x+=e*D,M+=e*V,m+=e*X,B+=e*j,S+=e*H,k+=e*J,K+=e*Q,p+=(e=t[11])*P,b+=e*N,g+=e*O,A+=e*C,_+=e*F,U+=e*I,d+=e*Z,E+=e*G,x+=e*q,M+=e*D,m+=e*V,B+=e*X,S+=e*j,k+=e*H,K+=e*J,Y+=e*Q,b+=(e=t[12])*P,g+=e*N,A+=e*O,_+=e*C,U+=e*F,d+=e*I,E+=e*Z,x+=e*G,M+=e*q,m+=e*D,B+=e*V,S+=e*X,k+=e*j,K+=e*H,Y+=e*J,L+=e*Q,g+=(e=t[13])*P,A+=e*N,_+=e*O,U+=e*C,d+=e*F,E+=e*I,x+=e*Z,M+=e*G,m+=e*q,B+=e*D,S+=e*V,k+=e*X,K+=e*j,Y+=e*H,L+=e*J,T+=e*Q,A+=(e=t[14])*P,_+=e*N,U+=e*O,d+=e*C,E+=e*F,x+=e*I,M+=e*Z,m+=e*G,B+=e*q,S+=e*D,k+=e*V,K+=e*X,Y+=e*j,L+=e*H,T+=e*J,z+=e*Q,_+=(e=t[15])*P,h+=38*(d+=e*O),a+=38*(E+=e*C),f+=38*(x+=e*F),s+=38*(M+=e*I),u+=38*(m+=e*Z),c+=38*(B+=e*G),y+=38*(S+=e*q),l+=38*(k+=e*D),w+=38*(K+=e*V),v+=38*(Y+=e*X),p+=38*(L+=e*j),b+=38*(T+=e*H),g+=38*(z+=e*J),A+=38*(R+=e*Q),i=(e=(i+=38*(U+=e*N))+(o=1)+65535)-65536*(o=Math.floor(e/65536)),h=(e=h+o+65535)-65536*(o=Math.floor(e/65536)),a=(e=a+o+65535)-65536*(o=Math.floor(e/65536)),f=(e=f+o+65535)-65536*(o=Math.floor(e/65536)),s=(e=s+o+65535)-65536*(o=Math.floor(e/65536)),u=(e=u+o+65535)-65536*(o=Math.floor(e/65536)),c=(e=c+o+65535)-65536*(o=Math.floor(e/65536)),y=(e=y+o+65535)-65536*(o=Math.floor(e/65536)),l=(e=l+o+65535)-65536*(o=Math.floor(e/65536)),w=(e=w+o+65535)-65536*(o=Math.floor(e/65536)),v=(e=v+o+65535)-65536*(o=Math.floor(e/65536)),p=(e=p+o+65535)-65536*(o=Math.floor(e/65536)),b=(e=b+o+65535)-65536*(o=Math.floor(e/65536)),g=(e=g+o+65535)-65536*(o=Math.floor(e/65536)),A=(e=A+o+65535)-65536*(o=Math.floor(e/65536)),_=(e=_+o+65535)-65536*(o=Math.floor(e/65536)),i=(e=(i+=o-1+37*(o-1))+(o=1)+65535)-65536*(o=Math.floor(e/65536)),h=(e=h+o+65535)-65536*(o=Math.floor(e/65536)),a=(e=a+o+65535)-65536*(o=Math.floor(e/65536)),f=(e=f+o+65535)-65536*(o=Math.floor(e/65536)),s=(e=s+o+65535)-65536*(o=Math.floor(e/65536)),u=(e=u+o+65535)-65536*(o=Math.floor(e/65536)),c=(e=c+o+65535)-65536*(o=Math.floor(e/65536)),y=(e=y+o+65535)-65536*(o=Math.floor(e/65536)),l=(e=l+o+65535)-65536*(o=Math.floor(e/65536)),w=(e=w+o+65535)-65536*(o=Math.floor(e/65536)),v=(e=v+o+65535)-65536*(o=Math.floor(e/65536)),p=(e=p+o+65535)-65536*(o=Math.floor(e/65536)),b=(e=b+o+65535)-65536*(o=Math.floor(e/65536)),g=(e=g+o+65535)-65536*(o=Math.floor(e/65536)),A=(e=A+o+65535)-65536*(o=Math.floor(e/65536)),_=(e=_+o+65535)-65536*(o=Math.floor(e/65536)),i+=o-1+37*(o-1),r[0]=i,r[1]=h,r[2]=a,r[3]=f,r[4]=s,r[5]=u,r[6]=c,r[7]=y,r[8]=l,r[9]=w,r[10]=v,r[11]=p,r[12]=b,r[13]=g,r[14]=A,r[15]=_}function I(r,t){F(r,t,t)}function Z(r,t){var n,e=v();for(n=0;n<16;n++)e[n]=t[n];for(n=253;0<=n;n--)I(e,e),2!==n&&4!==n&&F(e,e,t);for(n=0;n<16;n++)r[n]=e[n]}function G(r,t){var n,e=v();for(n=0;n<16;n++)e[n]=t[n];for(n=250;0<=n;n--)I(e,e),1!==n&&F(e,e,t);for(n=0;n<16;n++)r[n]=e[n]}function q(r,t,n){var e,o,i=new Uint8Array(32),h=new Float64Array(80),a=v(),f=v(),s=v(),u=v(),c=v(),y=v();for(o=0;o<31;o++)i[o]=t[o];for(i[31]=127&t[31]|64,i[0]&=248,N(h,n),o=0;o<16;o++)f[o]=h[o],u[o]=a[o]=s[o]=0;for(a[0]=u[0]=1,o=254;0<=o;--o)T(a,f,e=i[o>>>3]>>>(7&o)&1),T(s,u,e),O(c,a,s),C(a,a,s),O(s,f,u),C(f,f,u),I(u,c),I(y,a),F(a,s,a),F(s,f,c),O(c,a,s),C(a,a,s),I(f,a),C(s,u,y),F(a,s,p),O(a,a,u),F(s,s,a),F(a,u,y),F(u,f,h),I(f,c),T(a,f,e),T(s,u,e);for(o=0;o<16;o++)h[o+16]=a[o],h[o+32]=s[o],h[o+48]=f[o],h[o+64]=u[o];var l=h.subarray(32),w=h.subarray(16);return Z(l,l),F(w,w,l),z(r,w),0}function D(r,t){return q(r,t,n)}function V(r,t){return h(t,32),D(r,t)}function X(r,t,n){var e=new Uint8Array(32);return q(e,n,t),_(r,o,e,U)}m.prototype.blocks=function(r,t,n){for(var e,o,i,h,a,f,s,u,c,y,l,w,v,p,b,g,A,_,U,d=this.fin?0:2048,E=this.h[0],x=this.h[1],M=this.h[2],m=this.h[3],B=this.h[4],S=this.h[5],k=this.h[6],K=this.h[7],Y=this.h[8],L=this.h[9],T=this.r[0],z=this.r[1],R=this.r[2],P=this.r[3],N=this.r[4],O=this.r[5],C=this.r[6],F=this.r[7],I=this.r[8],Z=this.r[9];16<=n;)y=c=0,y+=(E+=8191&(e=255&r[t+0]|(255&r[t+1])<<8))*T,y+=(x+=8191&(e>>>13|(o=255&r[t+2]|(255&r[t+3])<<8)<<3))*(5*Z),y+=(M+=8191&(o>>>10|(i=255&r[t+4]|(255&r[t+5])<<8)<<6))*(5*I),y+=(m+=8191&(i>>>7|(h=255&r[t+6]|(255&r[t+7])<<8)<<9))*(5*F),c=(y+=(B+=8191&(h>>>4|(a=255&r[t+8]|(255&r[t+9])<<8)<<12))*(5*C))>>>13,y&=8191,y+=(S+=a>>>1&8191)*(5*O),y+=(k+=8191&(a>>>14|(f=255&r[t+10]|(255&r[t+11])<<8)<<2))*(5*N),y+=(K+=8191&(f>>>11|(s=255&r[t+12]|(255&r[t+13])<<8)<<5))*(5*P),y+=(Y+=8191&(s>>>8|(u=255&r[t+14]|(255&r[t+15])<<8)<<8))*(5*R),l=c+=(y+=(L+=u>>>5|d)*(5*z))>>>13,l+=E*z,l+=x*T,l+=M*(5*Z),l+=m*(5*I),c=(l+=B*(5*F))>>>13,l&=8191,l+=S*(5*C),l+=k*(5*O),l+=K*(5*N),l+=Y*(5*P),c+=(l+=L*(5*R))>>>13,l&=8191,w=c,w+=E*R,w+=x*z,w+=M*T,w+=m*(5*Z),c=(w+=B*(5*I))>>>13,w&=8191,w+=S*(5*F),w+=k*(5*C),w+=K*(5*O),w+=Y*(5*N),v=c+=(w+=L*(5*P))>>>13,v+=E*P,v+=x*R,v+=M*z,v+=m*T,c=(v+=B*(5*Z))>>>13,v&=8191,v+=S*(5*I),v+=k*(5*F),v+=K*(5*C),v+=Y*(5*O),p=c+=(v+=L*(5*N))>>>13,p+=E*N,p+=x*P,p+=M*R,p+=m*z,c=(p+=B*T)>>>13,p&=8191,p+=S*(5*Z),p+=k*(5*I),p+=K*(5*F),p+=Y*(5*C),b=c+=(p+=L*(5*O))>>>13,b+=E*O,b+=x*N,b+=M*P,b+=m*R,c=(b+=B*z)>>>13,b&=8191,b+=S*T,b+=k*(5*Z),b+=K*(5*I),b+=Y*(5*F),g=c+=(b+=L*(5*C))>>>13,g+=E*C,g+=x*O,g+=M*N,g+=m*P,c=(g+=B*R)>>>13,g&=8191,g+=S*z,g+=k*T,g+=K*(5*Z),g+=Y*(5*I),A=c+=(g+=L*(5*F))>>>13,A+=E*F,A+=x*C,A+=M*O,A+=m*N,c=(A+=B*P)>>>13,A&=8191,A+=S*R,A+=k*z,A+=K*T,A+=Y*(5*Z),_=c+=(A+=L*(5*I))>>>13,_+=E*I,_+=x*F,_+=M*C,_+=m*O,c=(_+=B*N)>>>13,_&=8191,_+=S*P,_+=k*R,_+=K*z,_+=Y*T,U=c+=(_+=L*(5*Z))>>>13,U+=E*Z,U+=x*I,U+=M*F,U+=m*C,c=(U+=B*O)>>>13,U&=8191,U+=S*N,U+=k*P,U+=K*R,U+=Y*z,E=y=8191&(c=(c=((c+=(U+=L*T)>>>13)<<2)+c|0)+(y&=8191)|0),x=l+=c>>>=13,M=w&=8191,m=v&=8191,B=p&=8191,S=b&=8191,k=g&=8191,K=A&=8191,Y=_&=8191,L=U&=8191,t+=16,n-=16;this.h[0]=E,this.h[1]=x,this.h[2]=M,this.h[3]=m,this.h[4]=B,this.h[5]=S,this.h[6]=k,this.h[7]=K,this.h[8]=Y,this.h[9]=L},m.prototype.finish=function(r,t){var n,e,o,i,h=new Uint16Array(10);if(this.leftover){for(i=this.leftover,this.buffer[i++]=1;i<16;i++)this.buffer[i]=0;this.fin=1,this.blocks(this.buffer,0,16)}for(n=this.h[1]>>>13,this.h[1]&=8191,i=2;i<10;i++)this.h[i]+=n,n=this.h[i]>>>13,this.h[i]&=8191;for(this.h[0]+=5*n,n=this.h[0]>>>13,this.h[0]&=8191,this.h[1]+=n,n=this.h[1]>>>13,this.h[1]&=8191,this.h[2]+=n,h[0]=this.h[0]+5,n=h[0]>>>13,h[0]&=8191,i=1;i<10;i++)h[i]=this.h[i]+n,n=h[i]>>>13,h[i]&=8191;for(h[9]-=8192,e=(1^n)-1,i=0;i<10;i++)h[i]&=e;for(e=~e,i=0;i<10;i++)this.h[i]=this.h[i]&e|h[i];for(this.h[0]=65535&(this.h[0]|this.h[1]<<13),this.h[1]=65535&(this.h[1]>>>3|this.h[2]<<10),this.h[2]=65535&(this.h[2]>>>6|this.h[3]<<7),this.h[3]=65535&(this.h[3]>>>9|this.h[4]<<4),this.h[4]=65535&(this.h[4]>>>12|this.h[5]<<1|this.h[6]<<14),this.h[5]=65535&(this.h[6]>>>2|this.h[7]<<11),this.h[6]=65535&(this.h[7]>>>5|this.h[8]<<8),this.h[7]=65535&(this.h[8]>>>8|this.h[9]<<5),o=this.h[0]+this.pad[0],this.h[0]=65535&o,i=1;i<8;i++)o=(this.h[i]+this.pad[i]|0)+(o>>>16)|0,this.h[i]=65535&o;r[t+0]=this.h[0]>>>0&255,r[t+1]=this.h[0]>>>8&255,r[t+2]=this.h[1]>>>0&255,r[t+3]=this.h[1]>>>8&255,r[t+4]=this.h[2]>>>0&255,r[t+5]=this.h[2]>>>8&255,r[t+6]=this.h[3]>>>0&255,r[t+7]=this.h[3]>>>8&255,r[t+8]=this.h[4]>>>0&255,r[t+9]=this.h[4]>>>8&255,r[t+10]=this.h[5]>>>0&255,r[t+11]=this.h[5]>>>8&255,r[t+12]=this.h[6]>>>0&255,r[t+13]=this.h[6]>>>8&255,r[t+14]=this.h[7]>>>0&255,r[t+15]=this.h[7]>>>8&255},m.prototype.update=function(r,t,n){var e,o;if(this.leftover){for(n<(o=16-this.leftover)&&(o=n),e=0;e<o;e++)this.buffer[this.leftover+e]=r[t+e];if(n-=o,t+=o,this.leftover+=o,this.leftover<16)return;this.blocks(this.buffer,0,16),this.leftover=0}if(16<=n&&(o=n-n%16,this.blocks(r,t,o),t+=o,n-=o),n){for(e=0;e<n;e++)this.buffer[this.leftover+e]=r[t+e];this.leftover+=n}};var j=k,H=K;var J=[1116352408,3609767458,1899447441,602891725,3049323471,3964484399,3921009573,2173295548,961987163,4081628472,1508970993,3053834265,2453635748,2937671579,2870763221,3664609560,3624381080,2734883394,310598401,1164996542,607225278,1323610764,1426881987,3590304994,1925078388,4068182383,2162078206,991336113,2614888103,633803317,3248222580,3479774868,3835390401,2666613458,4022224774,944711139,264347078,2341262773,604807628,2007800933,770255983,1495990901,1249150122,1856431235,1555081692,3175218132,1996064986,2198950837,2554220882,3999719339,2821834349,766784016,2952996808,2566594879,3210313671,3203337956,3336571891,1034457026,3584528711,2466948901,113926993,3758326383,338241895,168717936,666307205,1188179964,773529912,1546045734,1294757372,1522805485,1396182291,2643833823,1695183700,2343527390,1986661051,1014477480,2177026350,1206759142,2456956037,344077627,2730485921,1290863460,2820302411,3158454273,3259730800,3505952657,3345764771,106217008,3516065817,3606008344,3600352804,1432725776,4094571909,1467031594,275423344,851169720,430227734,3100823752,506948616,1363258195,659060556,3750685593,883997877,3785050280,958139571,3318307427,1322822218,3812723403,1537002063,2003034995,1747873779,3602036899,1955562222,1575990012,2024104815,1125592928,2227730452,2716904306,2361852424,442776044,2428436474,593698344,2756734187,3733110249,3204031479,2999351573,3329325298,3815920427,3391569614,3928383900,3515267271,566280711,3940187606,3454069534,4118630271,4000239992,116418474,1914138554,174292421,2731055270,289380356,3203993006,460393269,320620315,685471733,587496836,852142971,1086792851,1017036298,365543100,1126000580,2618297676,1288033470,3409855158,1501505948,4234509866,1607167915,987167468,1816402316,1246189591];function Q(r,t,n,e){for(var o,i,h,a,f,s,u,c,y,l,w,v,p,b,g,A,_,U,d,E,x,M,m,B,S=new Int32Array(16),k=new Int32Array(16),K=r[0],Y=r[1],L=r[2],T=r[3],z=r[4],R=r[5],P=r[6],N=r[7],O=t[0],C=t[1],F=t[2],I=t[3],Z=t[4],G=t[5],q=t[6],D=t[7],V=0;128<=e;){for(_=0;_<16;_++)U=8*_+V,S[_]=n[U+0]<<24|n[U+1]<<16|n[U+2]<<8|n[U+3],k[_]=n[U+4]<<24|n[U+5]<<16|n[U+6]<<8|n[U+7];for(_=0;_<80;_++)if(o=Y,i=L,h=T,c=C,y=F,l=I,x=65535&(E=D),M=E>>>16,m=65535&(d=N),B=d>>>16,x+=65535&(E=((w=Z)>>>14|(a=z)<<18)^(Z>>>18|z<<14)^(z>>>9|Z<<23)),M+=E>>>16,m+=65535&(d=(z>>>14|Z<<18)^(z>>>18|Z<<14)^(Z>>>9|z<<23)),B+=d>>>16,x+=65535&(E=Z&(v=G)^~Z&(p=q)),M+=E>>>16,m+=65535&(d=z&(f=R)^~z&(s=P)),B+=d>>>16,d=J[2*_],x+=65535&(E=J[2*_+1]),M+=E>>>16,m+=65535&d,B+=d>>>16,d=S[_%16],M+=(E=k[_%16])>>>16,m+=65535&d,B+=d>>>16,m+=(M+=(x+=65535&E)>>>16)>>>16,x=65535&(E=A=65535&x|M<<16),M=E>>>16,m=65535&(d=g=65535&m|(B+=m>>>16)<<16),B=d>>>16,x+=65535&(E=(O>>>28|K<<4)^(K>>>2|O<<30)^(K>>>7|O<<25)),M+=E>>>16,m+=65535&(d=(K>>>28|O<<4)^(O>>>2|K<<30)^(O>>>7|K<<25)),B+=d>>>16,M+=(E=O&C^O&F^C&F)>>>16,m+=65535&(d=K&Y^K&L^Y&L),B+=d>>>16,u=65535&(m+=(M+=(x+=65535&E)>>>16)>>>16)|(B+=m>>>16)<<16,b=65535&x|M<<16,x=65535&(E=l),M=E>>>16,m=65535&(d=h),B=d>>>16,M+=(E=A)>>>16,m+=65535&(d=g),B+=d>>>16,Y=K,L=o,T=i,z=h=65535&(m+=(M+=(x+=65535&E)>>>16)>>>16)|(B+=m>>>16)<<16,R=a,P=f,N=s,K=u,C=O,F=c,I=y,Z=l=65535&x|M<<16,G=w,q=v,D=p,O=b,_%16==15)for(U=0;U<16;U++)d=S[U],x=65535&(E=k[U]),M=E>>>16,m=65535&d,B=d>>>16,d=S[(U+9)%16],x+=65535&(E=k[(U+9)%16]),M+=E>>>16,m+=65535&d,B+=d>>>16,g=S[(U+1)%16],x+=65535&(E=((A=k[(U+1)%16])>>>1|g<<31)^(A>>>8|g<<24)^(A>>>7|g<<25)),M+=E>>>16,m+=65535&(d=(g>>>1|A<<31)^(g>>>8|A<<24)^g>>>7),B+=d>>>16,g=S[(U+14)%16],M+=(E=((A=k[(U+14)%16])>>>19|g<<13)^(g>>>29|A<<3)^(A>>>6|g<<26))>>>16,m+=65535&(d=(g>>>19|A<<13)^(A>>>29|g<<3)^g>>>6),B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,S[U]=65535&m|B<<16,k[U]=65535&x|M<<16;x=65535&(E=O),M=E>>>16,m=65535&(d=K),B=d>>>16,d=r[0],M+=(E=t[0])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[0]=K=65535&m|B<<16,t[0]=O=65535&x|M<<16,x=65535&(E=C),M=E>>>16,m=65535&(d=Y),B=d>>>16,d=r[1],M+=(E=t[1])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[1]=Y=65535&m|B<<16,t[1]=C=65535&x|M<<16,x=65535&(E=F),M=E>>>16,m=65535&(d=L),B=d>>>16,d=r[2],M+=(E=t[2])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[2]=L=65535&m|B<<16,t[2]=F=65535&x|M<<16,x=65535&(E=I),M=E>>>16,m=65535&(d=T),B=d>>>16,d=r[3],M+=(E=t[3])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[3]=T=65535&m|B<<16,t[3]=I=65535&x|M<<16,x=65535&(E=Z),M=E>>>16,m=65535&(d=z),B=d>>>16,d=r[4],M+=(E=t[4])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[4]=z=65535&m|B<<16,t[4]=Z=65535&x|M<<16,x=65535&(E=G),M=E>>>16,m=65535&(d=R),B=d>>>16,d=r[5],M+=(E=t[5])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[5]=R=65535&m|B<<16,t[5]=G=65535&x|M<<16,x=65535&(E=q),M=E>>>16,m=65535&(d=P),B=d>>>16,d=r[6],M+=(E=t[6])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[6]=P=65535&m|B<<16,t[6]=q=65535&x|M<<16,x=65535&(E=D),M=E>>>16,m=65535&(d=N),B=d>>>16,d=r[7],M+=(E=t[7])>>>16,m+=65535&d,B+=d>>>16,B+=(m+=(M+=(x+=65535&E)>>>16)>>>16)>>>16,r[7]=N=65535&m|B<<16,t[7]=D=65535&x|M<<16,V+=128,e-=128}return e}function W(r,t,n){var e,o=new Int32Array(8),i=new Int32Array(8),h=new Uint8Array(256),a=n;for(o[0]=1779033703,o[1]=3144134277,o[2]=1013904242,o[3]=2773480762,o[4]=1359893119,o[5]=2600822924,o[6]=528734635,o[7]=1541459225,i[0]=4089235720,i[1]=2227873595,i[2]=4271175723,i[3]=1595750129,i[4]=2917565137,i[5]=725511199,i[6]=4215389547,i[7]=327033209,Q(o,i,t,n),n%=128,e=0;e<n;e++)h[e]=t[a-n+e];for(h[n]=128,h[(n=256-128*(n<112?1:0))-9]=0,f(h,n-8,a/536870912|0,a<<3),Q(o,i,h,n),e=0;e<8;e++)f(r,8*e,o[e],i[e]);return 0}function $(r,t){var n=v(),e=v(),o=v(),i=v(),h=v(),a=v(),f=v(),s=v(),u=v();C(n,r[1],r[0]),C(u,t[1],t[0]),F(n,n,u),O(e,r[0],r[1]),O(u,t[0],t[1]),F(e,e,u),F(o,r[3],t[3]),F(o,o,y),F(i,r[2],t[2]),O(i,i,i),C(h,e,n),C(a,i,o),O(f,i,o),O(s,e,n),F(r[0],h,a),F(r[1],s,f),F(r[2],f,a),F(r[3],h,s)}function rr(r,t,n){var e;for(e=0;e<4;e++)T(r[e],t[e],n)}function tr(r,t){var n=v(),e=v(),o=v();Z(o,t[2]),F(n,t[0],o),F(e,t[1],o),z(r,e),r[31]^=P(n)<<7}function nr(r,t,n){var e,o;for(Y(r[0],s),Y(r[1],u),Y(r[2],u),Y(r[3],s),o=255;0<=o;--o)rr(r,t,e=n[o/8|0]>>(7&o)&1),$(t,r),$(r,r),rr(r,t,e)}function er(r,t){var n=[v(),v(),v(),v()];Y(n[0],e),Y(n[1],a),Y(n[2],u),F(n[3],e,a),nr(r,n,t)}function or(r,t,n){var e,o=new Uint8Array(64),i=[v(),v(),v(),v()];for(n||h(t,32),W(o,t,32),o[0]&=248,o[31]&=127,o[31]|=64,er(i,o),tr(r,i),e=0;e<32;e++)t[e+32]=r[e];return 0}var ir=new Float64Array([237,211,245,92,26,99,18,88,214,156,247,162,222,249,222,20,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,16]);function hr(r,t){var n,e,o,i;for(e=63;32<=e;--e){for(n=0,o=e-32,i=e-12;o<i;++o)t[o]+=n-16*t[e]*ir[o-(e-32)],n=Math.floor((t[o]+128)/256),t[o]-=256*n;t[o]+=n,t[e]=0}for(o=n=0;o<32;o++)t[o]+=n-(t[31]>>4)*ir[o],n=t[o]>>8,t[o]&=255;for(o=0;o<32;o++)t[o]-=n*ir[o];for(e=0;e<32;e++)t[e+1]+=t[e]>>8,r[e]=255&t[e]}function ar(r){var t,n=new Float64Array(64);for(t=0;t<64;t++)n[t]=r[t];for(t=0;t<64;t++)r[t]=0;hr(r,n)}function fr(r,t,n,e){var o,i,h=new Uint8Array(64),a=new Uint8Array(64),f=new Uint8Array(64),s=new Float64Array(64),u=[v(),v(),v(),v()];W(h,e,32),h[0]&=248,h[31]&=127,h[31]|=64;var c=n+64;for(o=0;o<n;o++)r[64+o]=t[o];for(o=0;o<32;o++)r[32+o]=h[32+o];for(W(f,r.subarray(32),n+32),ar(f),er(u,f),tr(r,u),o=32;o<64;o++)r[o]=e[o];for(W(a,r,n+64),ar(a),o=0;o<64;o++)s[o]=0;for(o=0;o<32;o++)s[o]=f[o];for(o=0;o<32;o++)for(i=0;i<32;i++)s[o+i]+=a[o]*h[i];return hr(r.subarray(32),s),c}function sr(r,t,n,e){var o,i=new Uint8Array(32),h=new Uint8Array(64),a=[v(),v(),v(),v()],f=[v(),v(),v(),v()];if(n<64)return-1;if(function(r,t){var n=v(),e=v(),o=v(),i=v(),h=v(),a=v(),f=v();if(Y(r[2],u),N(r[1],t),I(o,r[1]),F(i,o,c),C(o,o,r[2]),O(i,r[2],i),I(h,i),I(a,h),F(f,a,h),F(n,f,o),F(n,n,i),G(n,n),F(n,n,o),F(n,n,i),F(n,n,i),F(r[0],n,i),I(e,r[0]),F(e,e,i),R(e,o)&&F(r[0],r[0],l),I(e,r[0]),F(e,e,i),R(e,o))return 1;P(r[0])===t[31]>>7&&C(r[0],s,r[0]),F(r[3],r[0],r[1])}(f,e))return-1;for(o=0;o<n;o++)r[o]=t[o];for(o=0;o<32;o++)r[o+32]=e[o];if(W(h,r,n),ar(h),nr(a,f,h),er(f,t.subarray(32)),$(a,f),tr(i,a),n-=64,g(t,0,i,0)){for(o=0;o<n;o++)r[o]=0;return-1}for(o=0;o<n;o++)r[o]=t[o+64];return n}function ur(r,t){if(32!==r.length)throw new Error("bad key size");if(24!==t.length)throw new Error("bad nonce size")}function cr(){for(var r=0;r<arguments.length;r++)if(!(arguments[r]instanceof Uint8Array))throw new TypeError("unexpected type, use Uint8Array")}function yr(r){for(var t=0;t<r.length;t++)r[t]=0}i.lowlevel={crypto_core_hsalsa20:_,crypto_stream_xor:M,crypto_stream:x,crypto_stream_salsa20_xor:d,crypto_stream_salsa20:E,crypto_onetimeauth:B,crypto_onetimeauth_verify:S,crypto_verify_16:b,crypto_verify_32:g,crypto_secretbox:k,crypto_secretbox_open:K,crypto_scalarmult:q,crypto_scalarmult_base:D,crypto_box_beforenm:X,crypto_box_afternm:j,crypto_box:function(r,t,n,e,o,i){var h=new Uint8Array(32);return X(h,o,i),j(r,t,n,e,h)},crypto_box_open:function(r,t,n,e,o,i){var h=new Uint8Array(32);return X(h,o,i),H(r,t,n,e,h)},crypto_box_keypair:V,crypto_hash:W,crypto_sign:fr,crypto_sign_keypair:or,crypto_sign_open:sr,crypto_secretbox_KEYBYTES:32,crypto_secretbox_NONCEBYTES:24,crypto_secretbox_ZEROBYTES:32,crypto_secretbox_BOXZEROBYTES:16,crypto_scalarmult_BYTES:32,crypto_scalarmult_SCALARBYTES:32,crypto_box_PUBLICKEYBYTES:32,crypto_box_SECRETKEYBYTES:32,crypto_box_BEFORENMBYTES:32,crypto_box_NONCEBYTES:24,crypto_box_ZEROBYTES:32,crypto_box_BOXZEROBYTES:16,crypto_sign_BYTES:64,crypto_sign_PUBLICKEYBYTES:32,crypto_sign_SECRETKEYBYTES:64,crypto_sign_SEEDBYTES:32,crypto_hash_BYTES:64,gf:v,D:c,L:ir,pack25519:z,unpack25519:N,M:F,A:O,S:I,Z:C,pow2523:G,add:$,set25519:Y,modL:hr,scalarmult:nr,scalarbase:er},i.randomBytes=function(r){var t=new Uint8Array(r);return h(t,r),t},i.secretbox=function(r,t,n){cr(r,t,n),ur(n,t);for(var e=new Uint8Array(32+r.length),o=new Uint8Array(e.length),i=0;i<r.length;i++)e[i+32]=r[i];return k(o,e,e.length,t,n),o.subarray(16)},i.secretbox.open=function(r,t,n){cr(r,t,n),ur(n,t);for(var e=new Uint8Array(16+r.length),o=new Uint8Array(e.length),i=0;i<r.length;i++)e[i+16]=r[i];return e.length<32||0!==K(o,e,e.length,t,n)?null:o.subarray(32)},i.secretbox.keyLength=32,i.secretbox.nonceLength=24,i.secretbox.overheadLength=16,i.scalarMult=function(r,t){if(cr(r,t),32!==r.length)throw new Error("bad n size");if(32!==t.length)throw new Error("bad p size");var n=new Uint8Array(32);return q(n,r,t),n},i.scalarMult.base=function(r){if(cr(r),32!==r.length)throw new Error("bad n size");var t=new Uint8Array(32);return D(t,r),t},i.scalarMult.scalarLength=32,i.scalarMult.groupElementLength=32,i.box=function(r,t,n,e){var o=i.box.before(n,e);return i.secretbox(r,t,o)},i.box.before=function(r,t){cr(r,t),function(r,t){if(32!==r.length)throw new Error("bad public key size");if(32!==t.length)throw new Error("bad secret key size")}(r,t);var n=new Uint8Array(32);return X(n,r,t),n},i.box.after=i.secretbox,i.box.open=function(r,t,n,e){var o=i.box.before(n,e);return i.secretbox.open(r,t,o)},i.box.open.after=i.secretbox.open,i.box.keyPair=function(){var r=new Uint8Array(32),t=new Uint8Array(32);return V(r,t),{publicKey:r,secretKey:t}},i.box.keyPair.fromSecretKey=function(r){if(cr(r),32!==r.length)throw new Error("bad secret key size");var t=new Uint8Array(32);return D(t,r),{publicKey:t,secretKey:new Uint8Array(r)}},i.box.publicKeyLength=32,i.box.secretKeyLength=32,i.box.sharedKeyLength=32,i.box.nonceLength=24,i.box.overheadLength=i.secretbox.overheadLength,i.sign=function(r,t){if(cr(r,t),64!==t.length)throw new Error("bad secret key size");var n=new Uint8Array(64+r.length);return fr(n,r,r.length,t),n},i.sign.open=function(r,t){if(cr(r,t),32!==t.length)throw new Error("bad public key size");var n=new Uint8Array(r.length),e=sr(n,r,r.length,t);if(e<0)return null;for(var o=new Uint8Array(e),i=0;i<o.length;i++)o[i]=n[i];return o},i.sign.detached=function(r,t){for(var n=i.sign(r,t),e=new Uint8Array(64),o=0;o<e.length;o++)e[o]=n[o];return e},i.sign.detached.verify=function(r,t,n){if(cr(r,t,n),64!==t.length)throw new Error("bad signature size");if(32!==n.length)throw new Error("bad public key size");var e,o=new Uint8Array(64+r.length),i=new Uint8Array(64+r.length);for(e=0;e<64;e++)o[e]=t[e];for(e=0;e<r.length;e++)o[e+64]=r[e];return 0<=sr(i,o,o.length,n)},i.sign.keyPair=function(){var r=new Uint8Array(32),t=new Uint8Array(64);return or(r,t),{publicKey:r,secretKey:t}},i.sign.keyPair.fromSecretKey=function(r){if(cr(r),64!==r.length)throw new Error("bad secret key size");for(var t=new Uint8Array(32),n=0;n<t.length;n++)t[n]=r[32+n];return{publicKey:t,secretKey:new Uint8Array(r)}},i.sign.keyPair.fromSeed=function(r){if(cr(r),32!==r.length)throw new Error("bad seed size");for(var t=new Uint8Array(32),n=new Uint8Array(64),e=0;e<32;e++)n[e]=r[e];return or(t,n,!0),{publicKey:t,secretKey:n}},i.sign.publicKeyLength=32,i.sign.secretKeyLength=64,i.sign.seedLength=32,i.sign.signatureLength=64,i.hash=function(r){cr(r);var t=new Uint8Array(64);return W(t,r,r.length),t},i.hash.hashLength=64,i.verify=function(r,t){return cr(r,t),0!==r.length&&0!==t.length&&(r.length===t.length&&0===w(r,0,t,0,r.length))},i.setPRNG=function(r){h=r},function(){var o="undefined"!=typeof self?self.crypto||self.msCrypto:null;if(o&&o.getRandomValues){i.setPRNG(function(r,t){var n,e=new Uint8Array(t);for(n=0;n<t;n+=65536)o.getRandomValues(e.subarray(n,n+Math.min(t-n,65536)));for(n=0;n<t;n++)r[n]=e[n];yr(e)})}else"undefined"!=typeof require&&(o=require("crypto"))&&o.randomBytes&&i.setPRNG(function(r,t){var n,e=o.randomBytes(t);for(n=0;n<t;n++)r[n]=e[n];yr(e)})}()}("undefined"!=typeof module&&module.exports?module.exports:self.nacl=self.nacl||{});
+</script>
+<script>
+/* Mirrors studio/planner.py so the dashboard shows exactly what the worker will do.
+   Works in the browser (window.TRS_PLANNER) and in Node (module.exports) for tests. */
+(function (root) {
+  "use strict";
+  const EDIT_TYPES = ["opening", "subtitles", "background", "comment"];
+  const WINNER_MIN_VIEWS = 10000, WINNER_SHARE = 0.5, WINNER_WINDOW_DAYS = 10;
+  const HOUR = 36e5, DAY = 864e5;
+
+  function parseTs(ts) {
+    if (ts == null) return NaN;
+    if (typeof ts === "number") return ts;
+    let t = String(ts).replace("Z", "+0000");
+    if (/[+-]\d{4}$/.test(t)) t = t.slice(0, -2) + ":" + t.slice(-2);
+    if (!/[+-]\d\d:\d\d$/.test(t)) t += "Z";
+    return Date.parse(t);
+  }
+  const successful = (posts) => posts.filter((p) => p.status === "posted");
+  function usesBySource(posts) {
+    const out = {};
+    for (const p of successful(posts)) (out[p.source_id] = out[p.source_id] || []).push(parseTs(p.created_at));
+    return out;
+  }
+  const capFor = (m, s) => (m.variants_override ? Number(m.variants_override) : Number(s.variants_per_post));
+  const hasSource = (m) => !!(m.has_url || m.original || m.has_original || m.media_url || m.original_file);
+
+  function recipesFor(m, s) {
+    if (!m.analyzed) return null;
+    const ed = s.edits && s.edits.length ? s.edits : EDIT_TYPES;
+    const subs = !!m.has_speech && !m.has_text && ed.includes("subtitles");
+    const opening = !!m.opening_ok && ed.includes("opening");
+    const comment = !!m.comment_ok && ed.includes("comment");
+    const bg = ed.includes("background");
+    const sr = m.skip_rate;
+    const slow = sr == null || sr >= 50;
+    const openR = subs ? ["opening", "subtitles"] : ["opening"];
+    const out = [];
+    if (opening && slow) out.push(openR);
+    if (subs) out.push(["subtitles"]);
+    if (bg) out.push(["background"]);
+    if (comment) out.push(["comment"]);
+    if (bg && subs) out.push(["background", "subtitles"]);
+    if (opening && !slow) out.push(openR);
+    if (comment && bg) out.push(["background", "comment"]);
+    return out.length ? out : [["subtle"]];
+  }
+  function recipeFor(i, m, s) { const r = recipesFor(m, s); return r ? r[i % r.length] : null; }
+
+  function isWinner(m, posts, s, at) {
+    if (s.winners_first === false) return false;
+    const mine = successful(posts).filter((p) => p.source_id === m.id);
+    if (!mine.length) return false;
+    const last = mine.reduce((a, b) => (parseTs(b.created_at) > parseTs(a.created_at) ? b : a));
+    if (at - parseTs(last.created_at) > WINNER_WINDOW_DAYS * DAY) return false;
+    const v = last.variant_views;
+    if (v == null) return false;
+    return v >= WINNER_MIN_VIEWS || !!(m.views && v >= WINNER_SHARE * m.views);
+  }
+  function status(m, uses, s, at, winner = false) {
+    const cap = capFor(m, s), n = uses.length;
+    const base = { uses: n, cap, eligible: false, reason: "", ready_at: null, winner };
+    if (m.is_variant) return { ...base, reason: "Trial reel made by this app" };
+    if (m.available === 0 || m.available === false) return { ...base, reason: "No longer on your profile" };
+    if (m.excluded) return { ...base, reason: "Omitted" };
+    if (!hasSource(m)) return { ...base, reason: "Uses licensed music, upload the original to include it" };
+    if (m.views == null) return { ...base, reason: "Waiting for view count" };
+    if (n >= cap) return { ...base, reason: `All ${cap} variants made` };
+    const old = parseTs(m.timestamp) + Number(s.min_age_days) * DAY;
+    if (at < old) return { ...base, reason: "Too new", ready_at: new Date(old).toISOString() };
+    if (n) {
+      const cool = Math.max(...uses) + (winner ? 1 : Number(s.cooldown_days)) * DAY;
+      if (at < cool) return { ...base, reason: "Cooling down", ready_at: new Date(cool).toISOString() };
+    }
+    return { ...base, eligible: true, reason: "Ready" };
+  }
+  function order(media, posts, s, at) {
+    const byViews = (a, b) => (b.views || 0) - (a.views || 0);
+    const pri = media.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
+    const rest = media.filter((m) => m.priority == null);
+    const win = rest.filter((m) => isWinner(m, posts, s, at));
+    const other = rest.filter((m) => !win.includes(m)).sort(byViews);
+    return pri.concat(win.sort(byViews), other);
+  }
+  function pick(media, posts, s, at) {
+    const uses = usesBySource(posts);
+    for (const m of order(media, posts, s, at)) {
+      const st = status(m, uses[m.id] || [], s, at, isWinner(m, posts, s, at));
+      if (st.eligible) return { media: m, use_index: st.uses, recipe: recipeFor(st.uses, m, s) };
+    }
+    return null;
+  }
+
+  /* ---- time zones ---- */
+  const fmtCache = {};
+  function parts(ms, tz) {
+    const f = fmtCache[tz] || (fmtCache[tz] = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23",
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    const o = {};
+    for (const p of f.formatToParts(new Date(ms))) o[p.type] = p.value;
+    return { y: +o.year, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second };
+  }
+  function offset(ms, tz) {
+    const p = parts(ms, tz);
+    return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) - (ms - (((ms % 1000) + 1000) % 1000));
+  }
+  function zoned(day, hm, tz) {
+    const [y, mo, d] = day.split("-").map(Number);
+    const [h, mi] = (hm || "09:00").split(":").map(Number);
+    const guess = Date.UTC(y, mo - 1, d, h, mi);
+    const o1 = offset(guess, tz);
+    let t = guess - o1;
+    const o2 = offset(t, tz);
+    if (o2 !== o1) t = guess - o2;
+    return t;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  function localDay(ms, s) { const p = parts(ms, s.timezone || "UTC"); return `${p.y}-${pad(p.mo)}-${pad(p.d)}`; }
+  function addDays(day, k) {
+    const [y, mo, d] = day.split("-").map(Number);
+    const t = new Date(Date.UTC(y, mo - 1, d + k));
+    return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+  }
+  function slotsForDay(day, s) {
+    const n = Math.max(0, Math.min(Number(s.posts_per_day), 10));
+    if (!n) return [];
+    const tz = s.timezone || "UTC";
+    const start = zoned(day, s.window_start, tz);
+    let end = zoned(day, s.window_end, tz);
+    if (end <= start) end = start + HOUR;
+    const step = (end - start) / n;
+    return Array.from({ length: n }, (_, i) => start + step * i);
+  }
+  const postsOnDay = (posts, day, s, statuses = ["posted"]) =>
+    posts.filter((p) => statuses.includes(p.status) && localDay(parseTs(p.created_at), s) === day);
+  function guardBlocks(guard, s) {
+    if (!guard || !guard.paused || s.guardrails === false) return false;
+    const ack = s.guard_ack;
+    return !(ack && parseTs(ack) > parseTs(guard.since));
+  }
+  function dueNow(posts, s, now, guard = null) {
+    if (!s.enabled || guardBlocks(guard, s)) return false;
+    const day = localDay(now, s);
+    const passed = slotsForDay(day, s).filter((t) => t <= now);
+    const done = postsOnDay(posts, day, s).length;
+    if (done >= passed.length || done >= Number(s.posts_per_day)) return false;
+    const failed = postsOnDay(posts, day, s, ["failed"]);
+    if (failed.length >= 3) return false;
+    if (failed.length && now - Math.max(...failed.map((p) => parseTs(p.created_at))) < 30 * 6e4) return false;
+    return true;
+  }
+  function simulate(media, posts, s, now, n = 12) {
+    if (Number(s.posts_per_day) <= 0) return [];
+    const sim = posts.slice(), out = [];
+    const day = localDay(now, s);
+    const doneToday = postsOnDay(posts, day, s).length;
+    for (let d = 0; d < 45; d++) {
+      let slots = slotsForDay(addDays(day, d), s);
+      if (d === 0) slots = slots.slice(doneToday);
+      for (const t of slots) {
+        const at = Math.max(t, now);
+        const c = pick(media, sim, s, at);
+        if (!c) continue;
+        out.push({ time: new Date(at).toISOString(), media_id: c.media.id, use_index: c.use_index, recipe: c.recipe, cap: capFor(c.media, s) });
+        sim.push({ source_id: c.media.id, status: "posted", created_at: new Date(at).toISOString() });
+        if (out.length >= n) return out;
+      }
+    }
+    return out;
+  }
+  /* rough monthly GitHub Actions minutes at these settings (the free plan includes 2,000) */
+  function minutesEstimate(s) {
+    const posts = Math.max(0, Math.min(Number(s.posts_per_day), 10)) * 30;
+    return Math.round(12 * 30 + 4 * 30 * 1.5 + posts * 4.5);
+  }
+  /* how each kind of edit has done, from your own results */
+  function editStats(media, posts) {
+    const views = {};
+    for (const m of media) views[m.id] = m.views;
+    const rows = {};
+    for (const p of successful(posts)) {
+      if (p.variant_views == null) continue;
+      const src = views[p.source_id];
+      for (const k of p.recipe || (p.style ? [p.style] : [])) {
+        const r = rows[k] || (rows[k] = { n: 0, views: [], share: [] });
+        r.n += 1; r.views.push(p.variant_views);
+        if (src) r.share.push(p.variant_views / src);
+      }
+    }
+    const med = (a) => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); const k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k]) / 2; };
+    return Object.entries(rows).map(([k, r]) => ({ edit: k, count: r.n, median_views: med(r.views), median_share: med(r.share) }))
+      .sort((a, b) => (b.median_views || 0) - (a.median_views || 0));
+  }
+  /* Everything the Results view shows: whole-app impact and per-reel performance. */
+  const median = (a) => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); const k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k]) / 2; };
+  const dayMs = (d) => Date.parse(d + "T12:00:00Z");
+  function results(media, posts, st, s, now) {
+    const byId = {};
+    for (const m of media) byId[m.id] = m;
+    const originals = media.filter((m) => !m.is_variant && m.views != null);
+    const typical = median(originals.map((m) => m.views));
+    const done = successful(posts);
+    const start = done.length ? Math.min(...done.map((p) => parseTs(p.created_at))) : null;
+    const isWin = (p) => {
+      const src = byId[p.source_id];
+      return p.variant_views != null && (p.variant_views >= WINNER_MIN_VIEWS || !!(src && src.views && p.variant_views >= WINNER_SHARE * src.views));
+    };
+    function windowStats(since) {
+      const ps = done.filter((p) => parseTs(p.created_at) >= since);
+      const measured = ps.filter((p) => p.variant_views != null);
+      const views = measured.reduce((a, p) => a + p.variant_views, 0);
+      const best = measured.reduce((a, p) => (!a || p.variant_views > a.variant_views ? p : a), null);
+      return { count: ps.length, measured: measured.length, views, median: median(measured.map((p) => p.variant_views)),
+               beat: typical == null ? 0 : measured.filter((p) => p.variant_views >= typical).length,
+               winners: measured.filter(isWin).length, best: best ? { id: best.id, source_id: best.source_id, views: best.variant_views, recipe: best.recipe } : null,
+               shares: measured.reduce((a, p) => a + ((p.metrics && p.metrics.shares) || 0), 0),
+               saves: measured.reduce((a, p) => a + ((p.metrics && p.metrics.saved) || 0), 0) };
+    }
+    const reachRaw = Object.entries((st && st.reach) || {}).sort();
+    const reach = reachRaw.map(([day, value]) => ({ day, value }));
+    let reachCmp = null;
+    if (start != null) {
+      const before = reach.filter((r) => dayMs(r.day) < start && dayMs(r.day) >= start - 30 * DAY).map((r) => r.value);
+      const after = reach.filter((r) => dayMs(r.day) >= start).map((r) => r.value);
+      if (before.length >= 7 && after.length >= 3) {
+        const b = before.reduce((a, x) => a + x, 0) / before.length, a = after.reduce((x, y) => x + y, 0) / after.length;
+        reachCmp = { before: Math.round(b), after: Math.round(a), change: b ? (a - b) / b : null, days_after: after.length };
+      }
+    }
+    const followers = Object.entries((st && st.followers) || {}).sort().map(([day, value]) => ({ day, value }));
+    let fol = null;
+    if (followers.length >= 2) {
+      const first = followers[0], last = followers[followers.length - 1];
+      const startRow = start != null ? (followers.filter((f) => dayMs(f.day) <= start).pop() || first) : first;
+      const days = Math.max(1, (dayMs(last.day) - dayMs(startRow.day)) / DAY);
+      fol = { now: last.value, gained: last.value - startRow.value, since_day: startRow.day, per_week: ((last.value - startRow.value) / days) * 7 };
+    }
+    const groups = {};
+    for (const p of done) (groups[p.source_id] = groups[p.source_id] || []).push(p);
+    const perReel = Object.entries(groups).map(([id, ps]) => {
+      const m = byId[id] || { id };
+      const measured = ps.filter((p) => p.variant_views != null);
+      const total = measured.reduce((a, p) => a + p.variant_views, 0);
+      const best = measured.reduce((a, p) => (!a || p.variant_views > a.variant_views ? p : a), null);
+      return { id, views: m.views ?? null, versions: ps.length, total, median: median(measured.map((p) => p.variant_views)),
+               best: best ? { views: best.variant_views, recipe: best.recipe } : null, lift: m.views ? total / m.views : null,
+               winners: measured.filter(isWin).length, last: Math.max(...ps.map((p) => parseTs(p.created_at))) };
+    }).sort((a, b) => b.total - a.total);
+    const failed30 = posts.filter((p) => p.status === "failed" && now - parseTs(p.created_at) < 30 * DAY).length;
+    return { typical, start: start != null ? new Date(start).toISOString() : null,
+             last30: windowStats(now - 30 * DAY), all: windowStats(-Infinity), reach, reach_cmp: reachCmp,
+             followers, followers_cmp: fol, per_reel: perReel, failed_30: failed30,
+             guard: (st && st.guard) || null };
+  }
+  const api = { results, EDIT_TYPES, parseTs, usesBySource, capFor, hasSource, recipesFor, recipeFor, isWinner, status, order, pick,
+    localDay, addDays, slotsForDay, postsOnDay, guardBlocks, dueNow, simulate, minutesEstimate, editStats };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.TRS_PLANNER = api;
+})(typeof window !== "undefined" ? window : globalThis);
+
+</script>
+<script>
+/* Encrypts a value for GitHub's secrets API (libsodium sealed box), using tweetnacl plus BLAKE2b.
+   Needs window.nacl (tweetnacl). Exposes window.TRS_SEAL(publicKeyBase64, text) -> base64. */
+(function (root) {
+  "use strict";
+  const M = (1n << 64n) - 1n;
+  const IV = [0x6a09e667f3bcc908n, 0xbb67ae8584caa73bn, 0x3c6ef372fe94f82bn, 0xa54ff53a5f1d36f1n,
+              0x510e527fade682d1n, 0x9b05688c2b3e6c1fn, 0x1f83d9abfb41bd6bn, 0x5be0cd19137e2179n];
+  const SIGMA = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+    [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4], [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+    [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13], [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+    [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11], [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+    [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5], [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0]];
+  const rotr = (x, n) => ((x >> BigInt(n)) | (x << BigInt(64 - n))) & M;
+  function compress(h, block, t, last) {
+    const m = [];
+    for (let i = 0; i < 16; i++) {
+      let w = 0n;
+      for (let b = 7; b >= 0; b--) w = (w << 8n) | BigInt(block[i * 8 + b]);
+      m.push(w);
+    }
+    const v = h.concat(IV);
+    v[12] ^= t & M; v[13] ^= (t >> 64n) & M;
+    if (last) v[14] ^= M;
+    const G = (a, b, c, d, x, y) => {
+      v[a] = (v[a] + v[b] + x) & M; v[d] = rotr(v[d] ^ v[a], 32);
+      v[c] = (v[c] + v[d]) & M; v[b] = rotr(v[b] ^ v[c], 24);
+      v[a] = (v[a] + v[b] + y) & M; v[d] = rotr(v[d] ^ v[a], 16);
+      v[c] = (v[c] + v[d]) & M; v[b] = rotr(v[b] ^ v[c], 63);
+    };
+    for (let r = 0; r < 12; r++) {
+      const s = SIGMA[r % 10];
+      G(0, 4, 8, 12, m[s[0]], m[s[1]]); G(1, 5, 9, 13, m[s[2]], m[s[3]]);
+      G(2, 6, 10, 14, m[s[4]], m[s[5]]); G(3, 7, 11, 15, m[s[6]], m[s[7]]);
+      G(0, 5, 10, 15, m[s[8]], m[s[9]]); G(1, 6, 11, 12, m[s[10]], m[s[11]]);
+      G(2, 7, 8, 13, m[s[12]], m[s[13]]); G(3, 4, 9, 14, m[s[14]], m[s[15]]);
+    }
+    for (let i = 0; i < 8; i++) h[i] ^= v[i] ^ v[i + 8];
+  }
+  function blake2b(input, outlen) {
+    const h = IV.slice();
+    h[0] ^= 0x01010000n ^ BigInt(outlen);
+    let t = 0n, i = 0;
+    const len = input.length;
+    while (len - i > 128) {
+      t += 128n; compress(h, input.subarray(i, i + 128), t, false); i += 128;
+    }
+    const last = new Uint8Array(128);
+    last.set(input.subarray(i));
+    t += BigInt(len - i);
+    compress(h, last, t, true);
+    const out = new Uint8Array(outlen);
+    for (let k = 0; k < outlen; k++) out[k] = Number((h[k >> 3] >> BigInt(8 * (k & 7))) & 0xffn);
+    return out;
+  }
+  const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  function toB64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function seal(publicKeyB64, text) {
+    const nacl = root.nacl;
+    const pk = fromB64(publicKeyB64);
+    const eph = nacl.box.keyPair();
+    const nonceIn = new Uint8Array(64);
+    nonceIn.set(eph.publicKey); nonceIn.set(pk, 32);
+    const nonce = blake2b(nonceIn, 24);
+    const box = nacl.box(new TextEncoder().encode(text), nonce, pk, eph.secretKey);
+    const out = new Uint8Array(32 + box.length);
+    out.set(eph.publicKey); out.set(box, 32);
+    return toB64(out);
+  }
+  root.TRS_SEAL = seal;
+  root.TRS_BLAKE2B = blake2b;
+  root.TRS_B64 = { toB64, fromB64 };
+})(typeof window !== "undefined" ? window : globalThis);
+
+</script>
+<script>
+/* Dashboard backend: reads and writes your private GitHub repo and starts worker runs.
+   Exposes window.TRS_BACKEND with the same small API the dashboard uses everywhere. */
+(function () {
+  "use strict";
+  const P = window.TRS_PLANNER;
+  const API = "https://api.github.com";
+  const WORKFLOW = "studio.yml";
+  const LS = {
+    get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } },
+    del: (k) => { try { localStorage.removeItem(k); } catch (e) { /* private mode */ } },
+  };
+  const cfg = { token: LS.get("trs-token") || "", repo: LS.get("trs-repo") || window.TRS_REPO || "" };
+  const D = { defaults: null, settings: {}, controls: {}, catalog: { account: {}, media: [] }, thumbs: {}, history: [],
+              status: { log: [], token: {} }, previews: {}, analysis: {}, music: [], secrets: {}, thumbsSync: null };
+  let pending = null;        // a run we started that GitHub hasn't listed yet
+  let watching = null;       // the run we are waiting on
+  let lastFinished = null;
+  let lastActive = null;     // id of the last run we saw in progress
+  let needReload = false;
+  let reloading = null;
+  const previewUrls = {};
+
+  async function gh(method, path, body, opt = {}) {
+    const headers = { Authorization: "Bearer " + cfg.token, Accept: opt.accept || "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const r = await fetch(API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+    if (opt.allow404 && r.status === 404) return null;
+    if (r.status === 401) throw new Error("GitHub didn't accept the token. Reconnect in Settings.");
+    if (!r.ok) {
+      let msg = "";
+      try { msg = (await r.json()).message; } catch (e) { /* no body */ }
+      if (r.status === 403 || r.status === 404) msg = (msg || "Not allowed") + ". Check the token's repository access and permissions.";
+      throw new Error("GitHub: " + (msg || r.status));
+    }
+    if (opt.blob) return r.blob();
+    const text = await r.text();
+    if (opt.text) return text;
+    return text ? JSON.parse(text) : {};
+  }
+  const R = () => "/repos/" + cfg.repo;
+  const utf8b64 = (s) => window.TRS_B64.toB64(new TextEncoder().encode(s));
+
+  async function readJSON(path, def, ref = "main") {
+    const t = await gh("GET", `${R()}/contents/${path}?ref=${ref}`, undefined, { accept: "application/vnd.github.raw", text: true, allow404: true });
+    if (t == null) return def;
+    try { return JSON.parse(t); } catch (e) { return def; }
+  }
+  async function writeFile(path, b64, message) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const cur = await gh("GET", `${R()}/contents/${path}?ref=main`, undefined, { allow404: true });
+      try {
+        return await gh("PUT", `${R()}/contents/${path}`, { message, content: b64, branch: "main", ...(cur && cur.sha ? { sha: cur.sha } : {}) });
+      } catch (e) {
+        if (attempt === 1 || !/409|does not match/.test(e.message)) throw e;
+      }
+    }
+  }
+  async function writeBinary(path, file, message) {
+    const b64 = window.TRS_B64.toB64(new Uint8Array(await file.arrayBuffer()));
+    const blob = await gh("POST", `${R()}/git/blobs`, { content: b64, encoding: "base64" });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const ref = await gh("GET", `${R()}/git/ref/heads/main`);
+      const head = await gh("GET", `${R()}/git/commits/${ref.object.sha}`);
+      const tree = await gh("POST", `${R()}/git/trees`, { base_tree: head.tree.sha, tree: [{ path, mode: "100644", type: "blob", sha: blob.sha }] });
+      const commit = await gh("POST", `${R()}/git/commits`, { message, tree: tree.sha, parents: [ref.object.sha] });
+      try { return await gh("PATCH", `${R()}/git/refs/heads/main`, { sha: commit.sha }); }
+      catch (e) { if (attempt === 2) throw e; }  // the worker pushed in between; try again on top of it
+    }
+  }
+  const writeJSON = (path, obj, message) => writeFile(path, utf8b64(JSON.stringify(obj, null, 1) + "\n"), message);
+
+  async function setSecret(name, value) {
+    const key = await gh("GET", `${R()}/actions/secrets/public-key`);
+    await gh("PUT", `${R()}/actions/secrets/${name}`, { encrypted_value: window.TRS_SEAL(key.key, value), key_id: key.key_id });
+  }
+  async function dispatch(action, mediaId = "") {
+    const req = Math.random().toString(36).slice(2, 10);
+    await gh("POST", `${R()}/actions/workflows/${WORKFLOW}/dispatches`,
+             { ref: "main", inputs: { action, media_id: mediaId, request_id: req } });
+    pending = { kind: action, req, at: Date.now() };
+    return { started: action };
+  }
+
+  const settings = () => {
+    const s = { ...(D.defaults || {}), ...D.settings };
+    s.posts_per_day = Math.max(0, Math.min(Number(s.posts_per_day || 0), 10));
+    return s;
+  };
+  function media() {
+    return (D.catalog.media || []).map((m) => {
+      const c = D.controls[m.id] || {}, a = D.analysis[m.id] || {};
+      return { ...m, analyzed: a.analyzed || null, has_speech: a.has_speech ?? null, has_text: a.has_text ?? null,
+               opening_ok: a.opening_ok ?? null, comment_ok: a.comment_ok ?? null,
+               excluded: c.excluded ? 1 : 0, priority: c.priority ?? null, variants_override: c.variants_override || null,
+               original: !!(c.original || m.has_original) };
+    });
+  }
+
+  async function loadAll() {
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music] = await Promise.all([
+      D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
+      readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
+      readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
+      readJSON("data/status.json", { log: [], token: {} }), readJSON("data/previews.json", {}),
+      gh("GET", `${R()}/actions/secrets`).catch(() => ({ secrets: [] })),
+      readJSON("data/analysis.json", {}),
+      gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
+    ]);
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an });
+    D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
+    D.secrets = {};
+    for (const x of secrets.secrets || []) D.secrets[x.name] = x;
+    if (D.thumbsSync !== cat.last_sync) {
+      D.thumbs = await readJSON("data/thumbs.json", {});
+      D.thumbsSync = cat.last_sync;
+    }
+  }
+
+  async function jobState() {
+    let runs = [];
+    try { runs = (await gh("GET", `${R()}/actions/workflows/${WORKFLOW}/runs?per_page=10`)).workflow_runs || []; } catch (e) { return null; }
+    const kindOf = (r) => {
+      const t = (r.display_title || "").split(" ")[0];
+      return { tick: "check", sync: "sync", preview: "preview", post: "post", "refresh-token": "refresh" }[t] || "check";
+    };
+    if (pending) {
+      const found = runs.find((r) => (r.display_title || "").includes(pending.req));
+      if (found) { watching = found.id; pending = null; }
+      else if (Date.now() - pending.at > 120000) pending = null;
+    }
+    const active = runs.find((r) => r.status !== "completed");
+    if (watching) {
+      const w = runs.find((r) => r.id === watching);
+      if (w && w.status === "completed") {
+        lastFinished = { kind: kindOf(w), conclusion: w.conclusion, url: w.html_url, at: Date.now() };
+        watching = null;
+        needReload = true;
+      }
+    }
+    if (active) lastActive = active.id;
+    else if (lastActive) { lastActive = null; needReload = true; }
+    if (pending) return { kind: pending.kind === "refresh-token" ? "refresh" : pending.kind, detail: "Asking GitHub to start it", started: new Date(pending.at).toISOString() };
+    if (active) {
+      const mins = Math.max(0, Math.round((Date.now() - Date.parse(active.run_started_at || active.created_at)) / 60000));
+      const detail = active.status === "in_progress" ? `Running on GitHub${mins ? ", " + mins + " min so far" : ""}` : "Waiting for GitHub to start it";
+      return { kind: kindOf(active), detail, started: active.created_at, url: active.html_url };
+    }
+    return null;
+  }
+  function lastError() {
+    if (!lastFinished || lastFinished.conclusion === "success" || Date.now() - lastFinished.at > 60000) return null;
+    if (lastFinished.conclusion === "cancelled") return "That task was replaced by a newer one. Try again.";
+    const le = D.status.last_error;
+    if (le && Date.now() - P.parseTs(le.ts) < 30 * 60000) return le.message;
+    return "The run didn't finish. Details are in the Actions tab on GitHub.";
+  }
+
+  async function api(method, path, body) {
+    const now = Date.now();
+    const s = settings();
+    const mm = path.match(/^\/api\/media\/([^/]+)(\/\w+)?$/);
+    if (path === "/api/state" && method === "GET") {
+      const job = await jobState();
+      const day = P.localDay(now, s), slots = P.slotsForDay(day, s), done = P.postsOnDay(D.history, day, s).length;
+      const g = D.status.guard || null;
+      const blocked = P.guardBlocks(g, s);
+      const next = blocked ? null : slots.find((t, i) => i >= done && t > now);
+      const ig = D.secrets.IG_ACCESS_TOKEN;
+      let days = null;
+      if (D.status.token && D.status.token.expires_at) days = Math.max(0, Math.floor((P.parseTs(D.status.token.expires_at) - now) / 864e5));
+      else if (ig) days = Math.max(0, 60 - Math.floor((now - P.parseTs(ig.updated_at)) / 864e5));
+      const thumbs = D.thumbs || {};
+      return { account: { ...(D.catalog.account || {}), avatar: thumbs.avatar || null }, settings: s,
+               instagram: { connected: !!ig, days_left: days }, claude_key: !!D.secrets.ANTHROPIC_API_KEY,
+               today: { posted: done, planned: slots.length, next: next ? new Date(next).toISOString() : null },
+               last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
+               repo: cfg.repo, minutes: P.minutesEstimate(s),
+               guard: g ? { paused: !!g.paused, blocks: blocked, reasons: g.reasons || [], since: g.since, checked_at: g.checked_at } : null,
+               music: D.music };
+    }
+    if (path === "/api/media" && method === "GET") {
+      const list = media(), uses = P.usesBySource(D.history);
+      const next = {};
+      for (const q of P.simulate(list, D.history, s, now, 60)) if (!next[q.media_id]) next[q.media_id] = q.time;
+      const out = list.filter((m) => !m.is_variant && m.available !== 0).map((m) => {
+        const u = uses[m.id] || [], c = D.controls[m.id] || {};
+        return { ...m, thumb: D.thumbs[m.id] || null, licensed: !m.has_url, has_original: m.original,
+          status: P.status(m, u, s, now, P.isWinner(m, D.history, s, now)), next_at: next[m.id] || null,
+          next_recipe: P.recipeFor(u.length, m, s), analysis: D.analysis[m.id] || null,
+          next_caption: c.next_caption && c.next_caption_use === u.length ? c.next_caption : null,
+          preview: D.previews[m.id] || null };
+      });
+      out.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+      return { media: out };
+    }
+    if (path === "/api/queue") return { queue: P.simulate(media(), D.history, s, now, 14) };
+    if (path === "/api/posts") return { posts: D.history.slice().reverse().map((p) => ({ ...p, thumb: D.thumbs[p.source_id] || null })) };
+    if (path === "/api/log") return { log: (D.status.log || []).slice().reverse() };
+    if (path === "/api/results") {
+      const out = P.results(media(), D.history, D.status, s, now);
+      out.minutes = await minutesThisMonth();
+      return out;
+    }
+    if (path === "/api/insights") {
+      const reach = Object.entries(D.status.reach || {}).sort().map(([d, v]) => ({ day: d, value: v }));
+      return { edits: P.editStats(media(), D.history), reach, guard: D.status.guard || null };
+    }
+    if (path === "/api/guard/resume" && method === "POST") {
+      const next = { ...D.settings, guard_ack: new Date().toISOString() };
+      await writeJSON("data/settings.json", next, "Dashboard: resume after safety check");
+      D.settings = next;
+      return { ok: true };
+    }
+    if (path === "/api/music" && method === "POST") {
+      const file = body.get("file");
+      if (file.size > 20 * 1024 * 1024) throw new Error("Keep music files under 20 MB.");
+      const name = file.name.replace(/[^\w.\- ]+/g, "").replace(/\s+/g, "-") || "track.mp3";
+      await writeBinary(`music/${name}`, file, "Dashboard: add music");
+      await loadAll();
+      return { ok: true };
+    }
+    const mu = path.match(/^\/api\/music\/(.+)$/);
+    if (mu && method === "DELETE") {
+      const f = D.music.find((x) => x.name === decodeURIComponent(mu[1]));
+      if (f) await gh("DELETE", `${R()}/contents/music/${encodeURIComponent(f.name)}`, { message: "Dashboard: remove music", sha: f.sha, branch: "main" });
+      await loadAll();
+      return { ok: true };
+    }
+    if (path === "/api/settings" && method === "PUT") {
+      const RANGES = { posts_per_day: [0, 10], variants_per_post: [1, 20], cooldown_days: [1, 90], min_age_days: [0, 365] };
+      const next = { ...D.settings };
+      for (const [k, v0] of Object.entries(body)) {
+        if (!(k in (D.defaults || {}))) continue;
+        let v = v0;
+        if (RANGES[k]) v = Math.max(RANGES[k][0], Math.min(parseInt(v, 10) || 0, RANGES[k][1]));
+        if (k === "edits") v = P.EDIT_TYPES.filter((x) => v.includes(x));
+        if (k === "music" && !["off", "library", "ambient"].includes(v)) continue;
+        if (k === "hook_mode" && !["move", "repeat"].includes(v)) continue;
+        next[k] = v;
+      }
+      await writeJSON("data/settings.json", next, "Dashboard: settings");
+      D.settings = next;
+      return { settings: settings() };
+    }
+    if (path === "/api/priority" && method === "POST") {
+      const c = { ...D.controls };
+      for (const id of Object.keys(c)) if (c[id].priority != null) c[id] = { ...c[id], priority: null };
+      body.ids.forEach((id, i) => { c[id] = { ...(c[id] || {}), priority: i + 1 }; });
+      await writeJSON("data/controls.json", c, "Dashboard: priority order");
+      D.controls = c;
+      return { ok: true };
+    }
+    if (path === "/api/sync") return dispatch("sync");
+    if (path === "/api/refresh-token") { await dispatch("refresh-token"); return { refreshed: "started" }; }
+    if (path === "/api/secrets") {
+      if (body.ig_token) { await setSecret("IG_ACCESS_TOKEN", body.ig_token); await loadAll(); await dispatch("sync"); }
+      if (body.anthropic_key !== undefined) {
+        if (body.anthropic_key) await setSecret("ANTHROPIC_API_KEY", body.anthropic_key);
+        else await gh("DELETE", `${R()}/actions/secrets/ANTHROPIC_API_KEY`).catch(() => {});
+      }
+      await loadAll();
+      return { ok: true };
+    }
+    if (path === "/logout") { disconnect(); return { ok: true }; }
+    if (mm) {
+      const id = mm[1];
+      if (method === "PATCH") {
+        const c = { ...D.controls }, cur = { ...(c[id] || {}) };
+        if ("excluded" in body) cur.excluded = !!body.excluded;
+        if ("prioritized" in body) {
+          if (body.prioritized && cur.priority == null) cur.priority = Math.max(0, ...Object.values(c).map((x) => x.priority || 0)) + 1;
+          if (!body.prioritized) cur.priority = null;
+        }
+        if ("variants_override" in body) cur.variants_override = body.variants_override ? Math.max(1, Math.min(20, +body.variants_override)) : null;
+        c[id] = cur;
+        await writeJSON("data/controls.json", c, "Dashboard: reel settings");
+        D.controls = c;
+        return { ok: true };
+      }
+      if (mm[2] === "/preview") return dispatch("preview", id);
+      if (mm[2] === "/caption") {
+        const c = { ...D.controls }, use = (P.usesBySource(D.history)[id] || []).length;
+        c[id] = { ...(c[id] || {}), next_caption: body.caption || null, next_caption_use: body.caption ? use : null };
+        await writeJSON("data/controls.json", c, "Dashboard: caption for the next version");
+        D.controls = c;
+        return { ok: true };
+      }
+      if (mm[2] === "/post") return dispatch("post", id);
+      if (mm[2] === "/original") {
+        const file = body.get("file");
+        if (file.size > 40 * 1024 * 1024) throw new Error("That file is over 40 MB. Export a smaller version and try again.");
+        await writeBinary(`originals/${id}.mp4`, file, "Dashboard: original video");
+        const c = { ...D.controls };
+        c[id] = { ...(c[id] || {}), original: true };
+        await writeJSON("data/controls.json", c, "Dashboard: original video");
+        D.controls = c;
+        return { ok: true };
+      }
+    }
+    throw new Error("Unknown request " + path);
+  }
+
+  let minutesCache = null;
+  async function minutesThisMonth() {
+    if (minutesCache && Date.now() - minutesCache.at < 10 * 60000) return minutesCache.value;
+    const d = new Date(), month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+    let used = 0, runs = 0;
+    try {
+      for (let page = 1; page <= 10; page++) {
+        const r = await gh("GET", `${R()}/actions/runs?created=%3E%3D${month}&per_page=100&page=${page}`);
+        for (const x of r.workflow_runs || []) {
+          if (x.status !== "completed" || !x.run_started_at) continue;
+          runs += 1;
+          used += Math.max(1, Math.ceil((Date.parse(x.updated_at) - Date.parse(x.run_started_at)) / 60000));
+        }
+        if (!r.workflow_runs || r.workflow_runs.length < 100) break;
+      }
+    } catch (e) { return null; }
+    minutesCache = { at: Date.now(), value: { used, runs, limit: 2000 } };
+    return minutesCache.value;
+  }
+
+  async function previewUrl(id, madeAt) {
+    const key = id + "|" + madeAt;
+    if (!previewUrls[key]) {
+      const blob = await gh("GET", `${R()}/contents/${id}.mp4?ref=previews`, undefined, { accept: "application/vnd.github.raw", blob: true });
+      previewUrls[key] = URL.createObjectURL(new Blob([blob], { type: "video/mp4" }));
+    }
+    return previewUrls[key];
+  }
+
+  async function connect(token, repo) {
+    const old = { ...cfg };
+    cfg.token = token.trim(); cfg.repo = repo.trim().replace(/^https:\/\/github\.com\//, "").replace(/\/$/, "");
+    try {
+      const info = await gh("GET", R());
+      if (!info.private) throw new Error("That repository is public. Make it private first so your data stays yours.");
+      await gh("GET", `${R()}/actions/secrets/public-key`);
+      await setSecret("GH_PAT", cfg.token); // lets the worker save renewed Instagram tokens
+    } catch (e) { Object.assign(cfg, old); throw e; }
+    LS.set("trs-token", cfg.token); LS.set("trs-repo", cfg.repo);
+  }
+  function disconnect() { LS.del("trs-token"); cfg.token = ""; }
+
+  window.TRS_BACKEND = {
+    configured: () => !!(cfg.token && cfg.repo),
+    repo: () => cfg.repo,
+    async api(method, path, body) {
+      if (method === "GET" && path === "/api/state" && (!D.defaults || needReload)) {
+        needReload = false;
+        reloading = loadAll().finally(() => { reloading = null; });
+      }
+      if (reloading) await reloading;
+      return api(method, path, body);
+    },
+    loadAll, previewUrl, connect, disconnect,
+  };
+})();
+
+</script>
+
+<script>
+(function () {
+"use strict";
+const DEMO = !!window.TRS_DEMO;
+const TRS_PLANNER_SAFE = () => window.TRS_PLANNER || { minutesEstimate: (st) => Math.round(24 * 30 + 180 + Math.min(st.posts_per_day, 10) * 30 * 3.5) };
+const EDIT_LABEL = { opening: "New opening", subtitles: "Subtitles", background: "New background", comment: "Comment card", subtle: "Subtle edit",
+                     hook: "Hook text", canvas: "Framed", smart_edit: "Subtle edit" };
+const recipeLabel = (r) => (r && r.length ? r.map((k) => EDIT_LABEL[k] || k).join(" + ") : "");
+const SUB_LABEL = { classic: "Classic", highlight: "Highlight", boxed: "Boxed", pop: "Pop", serif: "Serif" };
+const ST = { state: null, media: [], posts: [], queue: [], log: [], view: "profile", filter: "all",
+             sheet: null, confirm: false, editing: {}, toast: null, busyAction: null };
+let localTab;
+try { localTab = localStorage.getItem("trs-view"); } catch (e) { localTab = null; }
+if (localTab) ST.view = localTab;
+
+/* ---------- icons ---------- */
+const I = {
+  grid: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
+  queue: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  posted: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 8h18M8 3l3 5M14 3l3 5"/><path d="M10 12v5l4.5-2.5z" fill="currentColor"/></svg>',
+  gear: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  sync: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h-4M6 22v-4h4"/></svg>',
+  play: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12.5-7.5z"/></svg>',
+  star: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg>',
+  starO: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg>',
+  eyeOff: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
+  eyeOffBig: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
+  music: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>',
+  down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+  minus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>',
+  plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  x: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+};
+
+/* ---------- helpers ---------- */
+const h = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const nf = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const num = (n) => (n == null ? "--" : nf.format(n));
+const tz = () => (ST.state && ST.state.settings.timezone) || undefined;
+function fmtTime(iso, withDay = true) {
+  if (!iso) return "";
+  const d = new Date(iso), now = new Date();
+  const day = (x) => new Intl.DateTimeFormat("en-CA", { timeZone: tz(), year: "numeric", month: "2-digit", day: "2-digit" }).format(x);
+  const t = new Intl.DateTimeFormat("en-US", { timeZone: tz(), hour: "numeric", minute: "2-digit" }).format(d);
+  if (!withDay) return t;
+  const tomorrow = new Date(now.getTime() + 864e5), yesterday = new Date(now.getTime() - 864e5);
+  if (day(d) === day(now)) return "Today, " + t;
+  if (day(d) === day(tomorrow)) return "Tomorrow, " + t;
+  if (day(d) === day(yesterday)) return "Yesterday, " + t;
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz(), weekday: "short", month: "short", day: "numeric" }).format(d) + ", " + t;
+}
+function fmtDate(iso) {
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz(), month: "short", day: "numeric", year: "numeric" }).format(new Date(iso.replace(/\+0000$/, "Z")));
+}
+const byId = (id) => ST.media.find((m) => m.id === id);
+function hue(id) { let x = 0; for (const c of id) x = (x * 31 + c.charCodeAt(0)) % 360; return x; }
+function tileBg(m) {
+  if (m && m.thumb) return `background-image:url('${h(m.thumb)}')`;
+  const a = hue((m && m.id) || "x");
+  return `background-image:linear-gradient(160deg,hsl(${a} 55% 46%),hsl(${(a + 50) % 360} 60% 30%))`;
+}
+function placeholder(m) {
+  if (m.thumb) return "";
+  const words = (m.caption || "").replace(/#\w+/g, "").trim().split(/\s+/).slice(0, 7).join(" ");
+  return `<span class="ph">${h(words)}</span>`;
+}
+function statusChip(m) {
+  const st = m.status;
+  if (m.excluded) return '<span class="chip red">Omitted</span>';
+  if (m.licensed && !m.has_original) return '<span class="chip amber">Licensed music</span>';
+  if (st.eligible && m.next_at) return `<span class="chip blue">Up next ${h(fmtTime(m.next_at))}</span>`;
+  if (st.eligible) return '<span class="chip green">Ready</span>';
+  if (st.reason === "Cooling down" || st.reason === "Too new") return `<span class="chip">${h(st.reason)} until ${h(fmtDate(st.ready_at))}</span>`;
+  return `<span class="chip">${h(st.reason)}</span>`;
+}
+function toast(msg) {
+  ST.toast = msg; renderLayer();
+  clearTimeout(toast._t); toast._t = setTimeout(() => { ST.toast = null; renderLayer(); }, 2600);
+}
+const stepper = (key, val, min, max, label) => `<div class="stepper" role="group" aria-label="${h(label)}">
+  <button type="button" data-act="step" data-key="${key}" data-d="-1" aria-label="Decrease" ${val <= min ? "disabled" : ""}>${I.minus}</button>
+  <output>${h(val)}</output>
+  <button type="button" data-act="step" data-key="${key}" data-d="1" aria-label="Increase" ${val >= max ? "disabled" : ""}>${I.plus}</button></div>`;
+const sw = (id, on, act, extra = "") => `<label class="switch"><input type="checkbox" id="${id}" data-act="${act}" ${extra} ${on ? "checked" : ""}><span></span></label>`;
+
+/* ---------- API ---------- */
+const BACK = window.TRS_BACKEND;
+const api = DEMO ? (m, p, b) => window.TRS_MOCK(m, p, b) : (m, p, b) => BACK.api(m, p, b);
+
+async function load(all = true) {
+  const tasks = [api("GET", "/api/state").then((d) => (ST.state = d))];
+  if (all) tasks.push(
+    api("GET", "/api/media").then((d) => (ST.media = d.media)),
+    api("GET", "/api/posts").then((d) => (ST.posts = d.posts)),
+    api("GET", "/api/queue").then((d) => (ST.queue = d.queue)));
+  if (all && ST.view === "settings") tasks.push(api("GET", "/api/log").then((d) => (ST.log = d.log)));
+  if (all) tasks.push(api("GET", "/api/insights").then((d) => (ST.insights = d)).catch(() => {}));
+  if (all) tasks.push(api("GET", "/api/results").then((d) => (ST.results = d)).catch(() => {}));
+  await Promise.all(tasks);
+  render();
+}
+let wasBusy = false;
+async function poll() {
+  try {
+    await api("GET", "/api/state").then((d) => (ST.state = d));
+    const busy = !!ST.state.job;
+    if (wasBusy && !busy) {
+      await load(true);
+      if (ST.state.last_error) toast(ST.state.last_error); else if (ST.busyAction) toast(ST.busyAction + " finished");
+      ST.busyAction = null;
+    } else renderTop();
+    wasBusy = busy;
+  } catch (e) { /* keep polling */ }
+  setTimeout(poll, wasBusy ? 4000 : 30000);
+}
+async function start(path, label) {
+  try {
+    await api("POST", path); ST.busyAction = label; wasBusy = true;
+    await api("GET", "/api/state").then((d) => (ST.state = d)); render();
+    setTimeout(poll, 4000);
+  } catch (e) { toast(e.message); }
+}
+async function saveSetting(key, value) {
+  try {
+    const d = await api("PUT", "/api/settings", { [key]: value });
+    ST.state.settings = d.settings; toast("Saved");
+    await load(true);
+  } catch (e) { toast(e.message); }
+}
+async function patchMedia(id, body) {
+  try { await api("PATCH", "/api/media/" + id, body); await load(true); } catch (e) { toast(e.message); }
+}
+
+/* ---------- render ---------- */
+function render() { renderTop(); renderNav(); renderLayer(); }
+function renderTop() {
+  const app = document.getElementById("app");
+  const s = ST.state;
+  if (!s) { app.innerHTML = '<div class="empty">Loading</div>'; return; }
+  const acct = s.account || {};
+  const job = s.job;
+  const titles = { profile: acct.username || "Trial Reels Studio", queue: "Up next", posted: "Results", settings: "Settings" };
+  let html = `<header class="top gut"><h1>${h(titles[ST.view])}</h1>
+    <button class="iconbtn" data-act="sync" aria-label="Sync with Instagram" title="Sync with Instagram" ${job || !s.instagram.connected ? "disabled" : ""}>
+      <span class="${job && job.kind === "sync" ? "spin" : ""}">${I.sync}</span></button></header>`;
+  if (DEMO) html += `<div class="demo gut">Preview with sample reels. Your deployed app shows your real Instagram.</div>`;
+  if (job) html += `<div class="jobbar gut"><span class="dot"></span>${h({ sync: "Syncing with Instagram", post: "Posting a trial reel", preview: "Making a preview", check: "Running the scheduled check", refresh: "Renewing the Instagram token" }[job.kind] || "Working")}${job.detail ? ": " + h(job.detail) : ""}</div>`;
+  html += ({ profile: viewProfile, queue: viewQueue, posted: viewPosted, settings: viewSettings }[ST.view])();
+  app.innerHTML = html;
+}
+function renderNav() {
+  const failed = ST.posts.some((p) => p.status === "failed" && Date.now() - new Date(p.created_at) < 864e5);
+  const items = [["profile", I.grid, "Reels"], ["queue", I.queue, "Up next"], ["posted", I.posted, "Results"], ["settings", I.gear, "Settings"]];
+  document.getElementById("nav").innerHTML = items.map(([v, icon, label]) =>
+    `<button data-act="nav" data-view="${v}" aria-label="${label}" aria-current="${ST.view === v ? "page" : "false"}" style="${ST.view === v ? "" : "opacity:.55"}">${icon}${v === "posted" && failed ? '<span class="badge"></span>' : ""}</button>`).join("");
+}
+
+function guardBanner() {
+  const g = ST.state && ST.state.guard;
+  if (!g || !g.blocks) return "";
+  return `<div class="panel" style="border-color:var(--warn)"><div class="txt"><div class="t" style="color:var(--warn)">Paused by a safety check</div>
+    <div class="s">${h((g.reasons || []).join(" "))} It starts again by itself once things recover.</div></div>
+    <button class="btn" data-act="resume-guard">Resume anyway</button></div>`;
+}
+function scheduleLine() {
+  const s = ST.state, set = s.settings;
+  if (s.guard && s.guard.blocks) return "Paused by a safety check, see below.";
+  if (!s.instagram.connected) return "Connect Instagram in Settings to start";
+  if (!set.enabled) return "Paused. Nothing will post until you turn this on.";
+  if (set.posts_per_day === 0) return "Set to 0 a day, so nothing will post";
+  const per = `${set.posts_per_day} a day`;
+  const next = s.today.next ? `next ${fmtTime(s.today.next)}` : (ST.queue[0] ? `next ${fmtTime(ST.queue[0].time)}` : "nothing ready to post");
+  return `On, ${per}, ${next}. ${s.today.posted} of ${s.today.planned} posted today.`;
+}
+
+function viewProfile() {
+  const s = ST.state, acct = s.account || {};
+  const reels = ST.media;
+  const counts = { all: reels.length, priority: reels.filter((m) => m.priority != null).length, omitted: reels.filter((m) => m.excluded).length };
+  let list = reels;
+  if (ST.filter === "priority") list = reels.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
+  if (ST.filter === "omitted") list = reels.filter((m) => m.excluded);
+  const firstNext = ST.queue[0] && ST.queue[0].media_id;
+  const avatar = acct.avatar ? `style="background-image:url('${h(acct.avatar)}')"` : "";
+  let html = `<section class="gut"><div class="prof"><div class="avatar" ${avatar} aria-hidden="true">${acct.avatar ? "" : h((acct.username || "?")[0].toUpperCase())}</div>
+    <div class="stats"><div><b>${num(acct.media_count ?? reels.length)}</b><span>posts</span></div><div><b>${num(acct.followers_count)}</b><span>followers</span></div><div><b>${num(acct.follows_count)}</b><span>following</span></div></div></div>
+    <div class="name">${h(acct.name || "")}</div>
+    <div class="panel"><div class="txt"><div class="t">Trial reels</div><div class="s">${h(scheduleLine())}</div></div>
+    ${s.instagram.connected ? sw("enabled-top", s.settings.enabled, "enabled", 'aria-label="Posting on or off"') : '<button class="btn primary" data-act="nav" data-view="settings">Connect</button>'}</div>${guardBanner()}</section>`;
+  html += `<div class="tabs gut" role="tablist">
+    ${[["all", I.grid, "All"], ["priority", I.starO, "Priority"], ["omitted", I.eyeOff, "Omitted"]].map(([k, ic, l]) =>
+      `<button class="tab" role="tab" aria-selected="${ST.filter === k}" data-act="filter" data-f="${k}">${ic.replace('width="24" height="24"', 'width="16" height="16"')}${l.toUpperCase()} ${counts[k] ? counts[k] : ""}</button>`).join("")}</div>`;
+  if (!s.instagram.connected && !reels.length) {
+    return html + `<div class="empty gut"><h2>Connect your Instagram</h2><p>Add your access token in Settings and your reels show up here, ranked and ready.</p></div>`;
+  }
+  if (!list.length) {
+    const msg = { all: "No reels yet. Tap sync to pull them in.", priority: "Star a reel to send it to the front of the line.", omitted: "Nothing omitted. Tap a reel and turn off Use for trial reels to keep it out." }[ST.filter];
+    return html + `<div class="empty gut"><p>${msg}</p></div>`;
+  }
+  html += `<div class="gut"><div class="grid">` + list.map((m) => {
+    const off = m.excluded;
+    const left = m.priority != null ? `<span class="pill star">${I.star}${h(rankOf(m))}</span>` : (m.id === firstNext ? '<span class="pill next">Next</span>' : (m.status.winner ? '<span class="pill star">Winner</span>' : "<span></span>"));
+    const right = m.licensed && !m.has_original ? `<span class="pill" title="Licensed music">${I.music}</span>` : (m.status.uses ? `<span class="pill">${m.status.uses}/${m.status.cap}</span>` : "");
+    return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="Reel with ${h(num(m.views))} views">
+      ${placeholder(m)}<span class="badges">${left}${right}</span>
+      ${off ? `<span class="officon">${I.eyeOffBig}</span>` : ""}
+      <span class="views">${I.play}${h(num(m.views))}</span></button>`;
+  }).join("") + `</div></div>`;
+  return html;
+}
+function rankOf(m) {
+  const pri = ST.media.filter((x) => x.priority != null).sort((a, b) => a.priority - b.priority);
+  return pri.findIndex((x) => x.id === m.id) + 1;
+}
+
+function viewQueue() {
+  const s = ST.state;
+  const pri = ST.media.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
+  let html = `<section class="gut"><div class="panel" style="margin-top:14px"><div class="txt"><div class="t">${s.settings.enabled ? "Posting is on" : "Posting is paused"}</div><div class="s">${h(scheduleLine())}</div></div>
+    ${s.instagram.connected ? sw("enabled-q", s.settings.enabled, "enabled", 'aria-label="Posting on or off"') : ""}</div>`;
+  html += guardBanner();
+  html += `<div class="sec">YOUR PRIORITY ORDER</div>`;
+  if (!pri.length) html += `<p class="note">Star reels to put them first in line. Everything else goes by views.</p>`;
+  else html += `<div class="list">` + pri.map((m, i) => `<div class="row"><div class="thumb" style="${tileBg(m)}"></div>
+      <div class="txt"><div class="t">#${i + 1}, ${h(num(m.views))} views</div><div class="s">${statusChipText(m)}</div></div>
+      <button class="mini" data-act="move" data-id="${h(m.id)}" data-d="-1" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.up}</button>
+      <button class="mini" data-act="move" data-id="${h(m.id)}" data-d="1" aria-label="Move down" ${i === pri.length - 1 ? "disabled" : ""}>${I.down}</button>
+      <button class="mini" data-act="unstar" data-id="${h(m.id)}" aria-label="Remove from priority">${I.x}</button></div>`).join("") + `</div>`;
+  html += `<div class="sec">SCHEDULE</div>`;
+  if (!ST.queue.length) html += `<p class="note">${s.settings.posts_per_day ? "Nothing is ready. Reels may be omitted, too new, cooling down, or out of variants." : "Trial reels per day is set to 0."}</p>`;
+  else html += `<div class="list">` + ST.queue.map((q) => {
+    const m = byId(q.media_id) || { id: q.media_id };
+    return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(m.id)}">
+      <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t qtime">${h(fmtTime(q.time))}</div>
+      <div class="s">Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}, from a reel with ${h(num(m.views))} views${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
+  }).join("") + `</div>`;
+  return html + `</section>`;
+}
+function statusChipText(m) {
+  if (m.excluded) return "Omitted";
+  if (m.status.eligible) return m.next_at ? "Up next " + fmtTime(m.next_at) : "Ready";
+  if (m.status.ready_at) return m.status.reason + " until " + fmtDate(m.status.ready_at);
+  return m.status.reason;
+}
+
+const pct = (x) => (x == null ? "--" : (x >= 0 ? "+" : "") + Math.round(x * 100) + "%");
+function lineChart(points, markerDay, label, fromZero = true) {
+  if (!points || points.length < 2) return "";
+  const W = 340, H = 96, L = 4, R = 4, T = 16, B = 18;
+  const vals = points.map((p) => p.value);
+  let lo = fromZero ? 0 : Math.min(...vals), hi = Math.max(...vals, 1);
+  if (!fromZero) { const pad = Math.max(1, (hi - lo) * 0.1); lo -= pad; hi += pad; }
+  const x = (i) => L + (i / (points.length - 1)) * (W - L - R), y = (v) => T + (1 - (v - lo) / (hi - lo || 1)) * (H - T - B);
+  const d = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+  const last = points.length - 1;
+  let mark = "";
+  const mi = markerDay ? points.findIndex((p) => p.day >= markerDay) : -1;
+  if (mi > 0) mark = `<line x1="${x(mi)}" x2="${x(mi)}" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-dasharray="3 3"></line>
+    <text x="${Math.min(x(mi) + 4, W - 60)}" y="${T - 5}">Started</text>`;
+  const fmtD = (dd) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(dd + "T12:00:00Z"));
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="${h(label)}">
+    <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--line)"></line>
+    <path d="${d}L${x(last)},${H - B}L${x(0)},${H - B}Z" fill="var(--accent)" opacity=".12"></path>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"></path>
+    <circle cx="${x(last)}" cy="${y(points[last].value)}" r="3.5" fill="var(--accent)"></circle>${mark}
+    <text x="${L}" y="${H - 4}">${h(fmtD(points[0].day))}</text><text x="${W - R}" y="${H - 4}" text-anchor="end">${h(fmtD(points[last].day))}</text></svg>`;
+}
+function metricsLine(p) {
+  const m = p.metrics || {};
+  const bits = [];
+  if (p.variant_views != null) bits.push(`<b style="color:var(--fg)">${h(num(p.variant_views))}</b> views`);
+  if (m.reach != null) bits.push(`${h(num(m.reach))} reached`);
+  if (m.likes != null) bits.push(`${h(num(m.likes))} likes`);
+  if (m.shares != null) bits.push(`${h(num(m.shares))} shares`);
+  if (m.saved != null) bits.push(`${h(num(m.saved))} saves`);
+  if (m.skip_rate != null) bits.push(`${Math.round(m.skip_rate)}% swiped away early`);
+  if (m.avg_watch_ms != null) bits.push(`${(m.avg_watch_ms / 1000).toFixed(1)}s avg watch`);
+  const c = p.checks || {};
+  if (c.d1 != null) bits.push(`day 1: ${h(num(c.d1))}${c.d3 != null ? `, day 3: ${h(num(c.d3))}` : ""}${c.d7 != null ? `, day 7: ${h(num(c.d7))}` : ""}`);
+  return bits.length ? `<div class="metrics">${bits.map((b) => `<span>${b}</span>`).join("")}</div>` : `<div class="s">Results appear after the next sync</div>`;
+}
+function verdictText(r, w) {
+  const parts = [];
+  if (!w.count) return "No trial reels in this period yet.";
+  parts.push(`${w.count} trial reel${w.count === 1 ? "" : "s"} brought in ${num(w.views)} views`);
+  if (r.typical != null && w.measured) parts.push(`${w.beat} beat your typical reel (${num(r.typical)} views)`);
+  let txt = parts.join(", and ") + ".";
+  if (r.reach_cmp && r.reach_cmp.change != null) txt += ` Reach to non-followers is ${r.reach_cmp.change >= 0 ? "up" : "down"} ${Math.abs(Math.round(r.reach_cmp.change * 100))}% compared with the 30 days before you started.`;
+  if (r.followers_cmp && r.followers_cmp.gained) txt += ` You've ${r.followers_cmp.gained >= 0 ? "gained" : "lost"} ${num(Math.abs(r.followers_cmp.gained))} followers since then.`;
+  return txt;
+}
+function signalsHtml(r, w) {
+  const rows = [];
+  const sig = (dir, title, detail) => rows.push(`<div class="signal"><i class="${dir}" aria-hidden="true">${dir === "up" ? "&#9650;" : dir === "down" ? "&#9660;" : "&#8226;"}</i><div class="txt"><div class="t">${h(title)}</div><div class="s">${h(detail)}</div></div></div>`);
+  if (r.reach_cmp) {
+    const c = r.reach_cmp.change;
+    sig(c > 0.1 ? "up" : c < -0.1 ? "down" : "flat", `Non-follower reach ${pct(c)}`, `${num(r.reach_cmp.before)} a day in the 30 days before, ${num(r.reach_cmp.after)} a day since (${r.reach_cmp.days_after} days).`);
+  } else sig("flat", "Non-follower reach", "Needs a week of history before and 3 days after starting to compare.");
+  if (r.typical != null && w.median != null) {
+    const ratio = w.median / r.typical;
+    sig(ratio >= 0.5 ? "up" : ratio < 0.15 ? "down" : "flat", `Median trial reel: ${num(w.median)} views`, `${Math.round(ratio * 100)}% of your typical reel. Trial reels start without your followers, so compare them with each other more than with regular reels.`);
+  }
+  if (w.measured) {
+    const rate = w.beat / w.measured;
+    sig(rate >= 0.15 ? "up" : rate === 0 && w.measured >= 10 ? "down" : "flat", `${w.beat} of ${w.measured} beat your typical reel`, `${Math.round(rate * 100)}% hit rate. Buzzfy's published figure is 19 in 100 for accounts with 1K to 20K followers.`);
+  }
+  if (r.followers_cmp) {
+    const pw = r.followers_cmp.per_week;
+    sig(pw > 0 ? "up" : pw < 0 ? "down" : "flat", `${pw >= 0 ? "+" : ""}${num(Math.round(pw))} followers a week`, `Since ${fmtDate(r.followers_cmp.since_day + "T12:00:00Z")}. Followers come from many things, so read this together with reach.`);
+  }
+  return rows.join("");
+}
+function viewPosted() {
+  const r = ST.results, s = ST.state;
+  if (!r) return `<div class="empty gut"><p>Loading results</p></div>`;
+  const w = ST.range === "all" ? r.all : r.last30;
+  const m30 = s.minutes;
+  let html = `<section class="gut">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding-top:14px;gap:12px"><div class="sec" style="padding:0">IS IT WORKING?</div>
+      <div class="seg" role="group" aria-label="Period"><button data-act="range" data-r="30" aria-pressed="${ST.range !== "all"}">30 days</button><button data-act="range" data-r="all" aria-pressed="${ST.range === "all"}">All time</button></div></div>
+    <p class="verdict">${h(verdictText(r, w))}</p>
+    <div class="stats4">
+      <div class="stat"><b>${h(num(w.count))}</b><span>trial reels posted</span></div>
+      <div class="stat"><b>${h(num(w.views))}</b><span>views from trial reels</span></div>
+      <div class="stat"><b>${h(num(w.beat))}</b><span>beat your typical reel</span></div>
+      <div class="stat"><b>${h(num(w.winners))}</b><span>winners (10K+ or half the original)</span></div>
+    </div>
+    <div class="list" style="padding-top:6px">${signalsHtml(r, w)}</div>`;
+  if (r.reach && r.reach.length > 1) {
+    html += `<div class="sec">REACH TO NON-FOLLOWERS, PER DAY</div><div class="panel" style="display:block">${lineChart(r.reach.slice(-60), r.start && r.start.slice(0, 10), "Daily reach to non-followers")}
+      <div class="s">From Instagram's account insights. Recent days fill in over 48 hours.</div></div>`;
+  }
+  if (r.followers && r.followers.length > 1) {
+    html += `<div class="sec">FOLLOWERS</div><div class="panel" style="display:block"><div class="t">${h(num(r.followers_cmp.now))} followers${r.followers_cmp.gained ? `, ${r.followers_cmp.gained > 0 ? "+" : ""}${h(num(r.followers_cmp.gained))} since you started` : ""}</div>
+      ${lineChart(r.followers.slice(-90), r.start && r.start.slice(0, 10), "Followers over time", false)}<div class="s">Recorded at each sync, starting the day you connected.</div></div>`;
+  }
+  const ins = ST.insights;
+  if (ins && ins.edits && ins.edits.length) {
+    html += `<div class="sec">WHAT'S WORKING, BY EDIT</div><div class="list">` + ins.edits.map((e) => `<div class="row"><div class="txt">
+      <div class="t">${h(EDIT_LABEL[e.edit] || e.edit)}</div><div class="s">${e.count} trial reel${e.count === 1 ? "" : "s"}${e.median_share != null ? `, ${Math.round(e.median_share * 100)}% of the original's views` : ""}</div></div>
+      <div class="qtime">${h(num(e.median_views))}</div></div>`).join("") + `</div><p class="note">Median views per trial reel. Turn off edits that lag in Settings.</p>`;
+  }
+  if (r.per_reel.length) {
+    html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
+      const m = byId(x.id) || { id: x.id };
+      return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(x.id)}">
+        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}</div>
+        <div class="s">Original: ${h(num(x.views))}${x.best ? `. Best version: ${h(num(x.best.views))}, ${h(recipeLabel(x.best.recipe))}` : ""}${x.winners ? `. ${x.winners} winner${x.winners === 1 ? "" : "s"}` : ""}</div></div>
+        <span class="chip ${x.lift != null && x.lift >= 0.5 ? "green" : ""}">${x.lift == null ? "--" : "+" + Math.round(x.lift * 100) + "%"}</span></button>`;
+    }).join("") + `</div><p class="note">The percentage is extra views on top of the original, from all its trial reels.</p>`;
+  }
+  html += `<div class="sec">WHAT THE APP DID</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Trial reels posted</div><div class="s">${h(num(r.all.count))} in total, since ${r.start ? h(fmtDate(r.start)) : "--"}</div></div><div class="qtime">${h(num(r.last30.count))}<span class="s"> / 30d</span></div></div>
+    <div class="row"><div class="txt"><div class="t">Shares and saves</div><div class="s">From trial reels in this period</div></div><div class="qtime">${h(num(w.shares))} · ${h(num(w.saves))}</div></div>
+    <div class="row"><div class="txt"><div class="t">Failed attempts</div><div class="s">Last 30 days, nothing was posted for these</div></div><div class="qtime">${h(num(r.failed_30))}</div></div>
+    <div class="row"><div class="txt"><div class="t">Free GitHub minutes this month</div><div class="s">${r.minutes ? `${h(num(r.minutes.runs))} runs` : "Estimated"}. The free plan includes 2,000.</div></div><div class="qtime">${h(num(r.minutes ? r.minutes.used : m30))}</div></div>
+    <div class="row"><div class="txt"><div class="t">Safety checks</div><div class="s">${r.guard && r.guard.paused ? h((r.guard.reasons || []).join(" ")) : "All clear"}</div></div><span class="chip ${r.guard && r.guard.paused ? "amber" : "green"}">${r.guard && r.guard.paused ? "Paused" : "OK"}</span></div>
+  </div>`;
+  if (!ST.posts.length) return html + `</section><div class="empty gut"><h2>No trial reels yet</h2><p>When the app posts one, it shows up here with its results.</p></div>`;
+  html += `<div class="sec">ALL TRIAL REELS</div><div class="list">` + ST.posts.map((p) => {
+    const m = byId(p.source_id) || { id: p.source_id, thumb: p.thumb };
+    const chip = p.status === "posted" ? "" : p.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip blue">Posting</span>';
+    return `<div class="row"><div class="thumb" style="${tileBg(m)}"></div><div class="txt">
+      <div class="t">${h(recipeLabel(p.recipe || (p.style ? [p.style] : [])) || "Trial reel")}</div>
+      <div class="s">${h(fmtTime(p.created_at))}, version ${(p.use_index ?? 0) + 1}${p.sub_style ? ", " + h(SUB_LABEL[p.sub_style] || p.sub_style) + " subtitles" : ""}${p.trigger === "manual" ? ", posted by you" : ""}${p.variant_permalink ? ` · <a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
+      ${p.status === "posted" ? metricsLine(p) : ""}
+      ${p.status === "failed" ? `<div class="s" style="color:var(--danger)">${h(p.error || "")}</div>` : ""}</div>${chip}</div>`;
+  }).join("") + `</div></section>`;
+  return html;
+}
+
+function viewSettings() {
+  const s = ST.state, set = s.settings;
+  const zones = ["America/Mexico_City", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York", "Europe/London", "Europe/Madrid"];
+  if (!zones.includes(set.timezone)) zones.unshift(set.timezone);
+  const many = set.posts_per_day > 3;
+  const ig = s.instagram, ed = ST.editing;
+  return `<section class="gut">
+  <div class="sec">POSTING</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Post trial reels</div><div class="s">${set.enabled ? "On" : "Paused"}</div></div>${sw("enabled-s", set.enabled, "enabled", 'aria-label="Post trial reels"')}</div>
+    <div class="row"><div class="txt"><div class="t">Trial reels per day</div><div class="s">Spread evenly across your posting window</div></div>${stepper("posts_per_day", set.posts_per_day, 0, s.hard_max, "Trial reels per day")}</div>
+    ${many ? `<p class="note warn">More than 3 a day makes it more likely Instagram sees them as repetitive and shows them to fewer people.</p>` : ""}
+    <div class="row" style="display:block"><div class="t">Posting window</div><div class="s">Trial reels go out between these times</div>
+      <div style="display:flex;gap:8px;align-items:center;padding-top:8px"><input class="field" type="time" id="ws" value="${h(set.window_start)}" data-act="time" data-key="window_start" aria-label="Window start">
+      <span class="s">to</span><input class="field" type="time" id="we" value="${h(set.window_end)}" data-act="time" data-key="window_end" aria-label="Window end"></div></div>
+    <div class="row"><div class="txt"><div class="t">Time zone</div></div><select class="field" id="tz" style="width:auto;max-width:55%" data-act="tz">${zones.map((z) => `<option ${z === set.timezone ? "selected" : ""}>${h(z)}</option>`).join("")}</select></div>
+  </div>
+  <div class="sec">VARIANTS</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Variants per reel</div><div class="s">How many trial reels each reel can become. You can change this per reel.</div></div>${stepper("variants_per_post", set.variants_per_post, 1, 20, "Variants per reel")}</div>
+    <div class="row"><div class="txt"><div class="t">Days between variants</div><div class="s">Wait this long before reusing the same reel</div></div>${stepper("cooldown_days", set.cooldown_days, 1, 90, "Days between variants")}</div>
+    <div class="row"><div class="txt"><div class="t">Skip reels newer than</div><div class="s">${set.min_age_days} days, so a variant never competes with a fresh original</div></div>${stepper("min_age_days", set.min_age_days, 0, 365, "Minimum age in days")}</div>
+    <div class="row"><div class="txt"><div class="t">Winners go first</div><div class="s">When a trial reel passes 10K views or half its original's, the next version of that reel jumps the queue</div></div>${sw("winners", set.winners_first, "winners")}</div>
+  </div>
+  <div class="sec">EDITS</div><div class="list">
+    <div class="row" style="display:block"><div class="t">Edits to use</div><div class="s">Each version of a reel gets the next edit that fits it. Subtitles only go on reels with speech and no text on screen.</div>
+      <div class="chips" style="padding-top:8px">${["opening", "subtitles", "background", "comment"].map((k) => `<button class="toggle-chip" data-act="edit-type" data-edit="${k}" aria-pressed="${(set.edits || []).includes(k)}">${EDIT_LABEL[k]}</button>`).join("")}</div></div>
+    <div class="row"><div class="txt"><div class="t">Move the strongest line to the front</div><div class="s">${set.hook_mode === "move" ? "It's cut from its original spot, so it isn't heard twice" : "It plays first, then the reel runs from the start"}</div></div>${sw("hookmove", set.hook_mode === "move", "hookmove")}</div>
+    <div class="row"><div class="txt"><div class="t">Cut dead air</div><div class="s">Removes pauses between sentences and changes the framing at each cut, centered on your face</div></div>${sw("deadair", set.cut_dead_air, "deadair")}</div>
+    <div class="row"><div class="txt"><div class="t">Vary pacing</div><div class="s">Versions alternate between normal speed and 4 or 8% faster</div></div>${sw("pacing", set.vary_pacing, "pacing")}</div>
+    <div class="row"><div class="txt"><div class="t">Show the commenter's name</div><div class="s">On comment cards. Off shows "Reply to a comment".</div></div>${sw("commenter", set.show_commenter, "commenter")}</div>
+  </div>
+  <div class="sec">BACKGROUND MUSIC</div><div class="list">
+    ${[["off", "Off", "Keep the original sound only"], ["library", "Your tracks", "Rotates through the tracks below, softly under your voice"], ["ambient", "Soft ambient pad", "A quiet generated tone bed, no licensing needed"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="music" id="mu-${v}" data-act="music" value="${v}" ${set.music === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
+    ${(s.music || []).map((f) => `<div class="row"><div class="txt"><div class="t">${h(f.name)}</div></div><button class="mini" data-act="del-music" data-name="${h(f.name)}" aria-label="Remove ${h(f.name)}">${I.x}</button></div>`).join("")}
+    <div class="row" style="display:block"><label class="t" for="musicup">Add a track</label><div class="s">Only music you have the rights to, like royalty-free libraries. Under 20 MB.</div>
+      <input type="file" id="musicup" accept="audio/*" data-act="upload-music" style="padding-top:8px" ${DEMO ? "disabled" : ""}></div>
+  </div>
+  <div class="sec">SAFETY</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Safety checks</div><div class="s">Pause posting if reach to non-followers drops by more than half, trial reels stop getting views, or Instagram sends a limit message</div></div>${sw("guardrails", set.guardrails, "guardrails")}</div>
+  </div>
+  <div class="sec">CAPTIONS</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Refresh captions with Claude</div><div class="s">${s.claude_key ? "Refreshes the caption's opening and helps pick the strongest line. Uses your Claude API credit, a fraction of a cent per post." : "Optional, needs a Claude API key below. Without it, the original caption is reused, cleaned up. Claude also helps pick the strongest opening line."}</div></div>${sw("ai", set.caption_mode === "ai" && s.claude_key, "ai", s.claude_key ? "" : "disabled")}</div>
+    <div class="row" style="display:block"><label class="t" for="voice">Voice notes</label>
+      <textarea class="field" id="voice" data-act="voice" style="margin-top:8px">${h(set.voice)}</textarea></div>
+    <div class="row"><div class="txt"><div class="t">Remove @mentions</div><div class="s">So the same people aren't tagged again</div></div>${sw("mentions", set.strip_mentions, "mentions")}</div>
+  </div>
+  <div class="sec">VIDEO LINK</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Backup link if the main one fails</div><div class="s">Instagram downloads each video from a temporary link. If the free Cloudflare link fails, use litterbox.catbox.moe, a free host that deletes the file after an hour.</div></div>${sw("backup", set.backup_host, "backup")}</div>
+  </div>
+  <div class="sec">WHEN A TRIAL REEL DOES WELL</div><div class="list">
+    <label class="radio"><input type="radio" name="grad" id="g1" data-act="grad" value="MANUAL" ${set.graduation_strategy === "MANUAL" ? "checked" : ""}><span>I'll share it to followers myself</span></label>
+    <label class="radio"><input type="radio" name="grad" id="g2" data-act="grad" value="SS_PERFORMANCE" ${set.graduation_strategy === "SS_PERFORMANCE" ? "checked" : ""}><span>Share it to followers automatically</span></label>
+  </div>
+  <div class="sec">CONNECTIONS</div><div class="list">
+    <div class="row" style="display:block"><div class="t">Instagram</div>
+      <div class="s">${ig.connected ? `Connected${s.account.username ? " as @" + h(s.account.username) : ""}. The token renews itself every week${ig.days_left != null ? `, ${ig.days_left} days left` : ""}.` : "Not connected. Paste the access token from your Meta app."}</div>
+      ${ed.ig || !ig.connected ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="igtok" type="password" placeholder="Paste your Instagram access token" autocomplete="off"><button class="btn primary" data-act="save-ig">Save</button></div>` : `<div style="display:flex;gap:16px;padding-top:6px"><button class="btn danger" data-act="edit" data-k="ig">Replace token</button><button class="btn danger" data-act="refresh-token">Renew now</button></div>`}</div>
+    <div class="row" style="display:block"><div class="t">Claude API key</div><div class="s">${s.claude_key ? "Saved" : "Optional, for caption refreshes"}</div>
+      ${ed.claude || !s.claude_key ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="clkey" type="password" placeholder="sk-ant-..." autocomplete="off"><button class="btn primary" data-act="save-claude">Save</button></div>` : `<button class="btn danger" data-act="edit" data-k="claude" style="padding-top:6px">Replace key</button>`}</div>
+  </div>
+  <div class="sec">ACTIVITY</div><div class="log">${ST.log.length ? ST.log.slice(0, 25).map((l) => `<div class="${l.level === "error" ? "err" : ""}">${h(fmtTime(l.ts))}: ${h(l.message)}</div>`).join("") : "Nothing yet."}</div>
+  <div class="sec">FREE PLAN</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">GitHub Actions minutes</div><div class="s">About ${h(String(TRS_PLANNER_SAFE().minutesEstimate(set)))} of the 2,000 free minutes a month at these settings${TRS_PLANNER_SAFE().minutesEstimate(set) > 1800 ? ". That's close to the limit, so lower trial reels per day." : "."}</div></div></div>
+    ${s.repo ? `<div class="row"><div class="txt"><div class="t">Data repository</div><div class="s">${h(s.repo)} (private)</div></div></div>` : ""}
+  </div>
+  <p class="note" style="padding-top:16px">Safety limit: never more than ${s.hard_max} trial reels a day. Everything goes through Instagram's official API, never with your password.</p>
+  ${DEMO ? "" : '<p style="padding-block:8px 24px"><button class="btn" data-act="logout">Disconnect this device</button></p>'}
+  </section>`;
+}
+
+/* ---------- sheet ---------- */
+function renderLayer() {
+  const layer = document.getElementById("layer");
+  let html = "";
+  if (ST.sheet) {
+    const m = byId(ST.sheet);
+    if (m) html += sheetHtml(m);
+  }
+  if (ST.toast) html += `<div class="toast" role="status">${h(ST.toast)}</div>`;
+  layer.innerHTML = html;
+  const pv = document.getElementById("pv");
+  if (pv && !DEMO) BACK.previewUrl(pv.dataset.id, pv.dataset.made).then((url) => {
+    pv.src = url; const n = document.getElementById("pvnote"); if (n) n.remove();
+  }).catch((e) => { const n = document.getElementById("pvnote"); if (n) n.textContent = e.message; });
+}
+function sheetHtml(m) {
+  const set = ST.state.settings, st = m.status, busy = !!ST.state.job;
+  const hist = ST.posts.filter((p) => p.source_id === m.id);
+  const cap = m.variants_override || set.variants_per_post;
+  const prev = m.preview;
+  let html = `<div class="scrim" data-act="close-bg"><div class="sheet gut" role="dialog" aria-modal="true" aria-label="Reel controls">
+    <div class="handle"></div>
+    <div class="shead"><div class="thumb" style="${tileBg(m)}"></div><div class="meta">
+      <div class="v">${h(num(m.views))} views</div><div class="s" style="color:var(--muted);font-size:13px">Posted ${h(fmtDate(m.timestamp))}${m.permalink ? ` · <a href="${h(m.permalink)}" target="_blank" rel="noopener">Open in Instagram</a>` : ""}</div>
+      <div class="cap">${h(m.caption)}</div></div>
+      <button class="iconbtn" data-act="close" aria-label="Close">${I.x}</button></div>
+    <div class="chips">${statusChip(m)}<span class="chip">${st.uses} of ${st.cap} variants made</span>${st.winner ? '<span class="chip green">Last version won</span>' : ""}</div>
+    ${m.next_recipe ? `<p class="s" style="margin:6px 0 0">Next edit: <b>${h(recipeLabel(m.next_recipe))}</b></p>` : (m.analysis ? "" : `<p class="note">The edit is picked when the first version is made: the app listens to the reel and checks for text on screen.</p>`)}
+    ${m.analysis && m.analysis.opening ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">Strongest line: "${h(m.analysis.opening.text)}"</p>` : ""}
+    ${m.analysis && m.analysis.comment ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">Comment card: "${h(m.analysis.comment.text)}"</p>` : ""}
+    <div class="list">
+      <div class="row"><div class="txt"><div class="t">Use for trial reels</div><div class="s">${m.excluded ? "Omitted, it will never be reposted" : "Included"}</div></div>${sw("inc", !m.excluded, "include", `data-id="${h(m.id)}"`)}</div>
+      <div class="row"><div class="txt"><div class="t">Prioritize</div><div class="s">${m.priority != null ? `#${rankOf(m)} in your priority order, goes before reels ranked by views` : "Goes before reels ranked by views"}</div></div>${sw("pri", m.priority != null, "prioritize", `data-id="${h(m.id)}"`)}</div>
+      <div class="row"><div class="txt"><div class="t">Variants of this reel</div><div class="s">${m.variants_override ? `Custom. <button class="btn danger" style="padding:0;font-size:13px" data-act="reset-variants" data-id="${h(m.id)}">Use default (${set.variants_per_post})</button>` : `Default for all reels`}</div></div>
+        ${stepper("variants:" + m.id, cap, 1, 20, "Variants of this reel")}</div>
+    </div>`;
+  if (m.licensed && !m.has_original) {
+    html += `<div class="confirm"><div class="t" style="font-weight:600">This reel uses music from Instagram's library</div>
+      <div class="s" style="color:var(--muted);font-size:13px">Instagram won't hand over the video file. Upload your own original (without the licensed track) to include it.</div>
+      <input type="file" id="orig" accept="video/*" data-act="upload" data-id="${h(m.id)}" ${DEMO ? "disabled" : ""}></div>`;
+  }
+  if (prev) {
+    html += `<div class="preview"><div style="font-weight:600">Next version: ${h(recipeLabel(prev.recipe || (prev.style ? [prev.style] : [])))}</div>
+      ${DEMO ? `<div class="fakevid" style="${tileBg(m)}">${h(prev.hook || "")}</div>` : `<video id="pv" data-id="${h(m.id)}" data-made="${h(prev.made_at)}" controls playsinline preload="metadata"></video><div class="note" id="pvnote">Loading the video</div>`}
+      <div class="s" style="color:var(--muted);font-size:13px">${[prev.dead_air_cuts ? prev.dead_air_cuts + " pauses cut" : "", prev.speed && prev.speed !== 1 ? Math.round((prev.speed - 1) * 100) + "% faster" : "", prev.sub_style ? (SUB_LABEL[prev.sub_style] || prev.sub_style) + " subtitles" : "", prev.background ? prev.background + " background" : "", prev.music ? "music: " + prev.music : ""].filter(Boolean).map(h).join(", ")}</div>
+      <label class="t" for="capedit" style="font-size:13px">Caption</label>
+      <textarea class="field" id="capedit">${h(m.next_caption || prev.caption)}</textarea>
+      <div><button class="btn" data-act="save-caption" data-id="${h(m.id)}">Save caption</button></div></div>`;
+  }
+  if (ST.confirm) {
+    html += `<div class="confirm"><div style="font-weight:600">Post this as a trial reel now?</div>
+      <div class="s" style="color:var(--muted);font-size:13px">It goes to non-followers first and counts toward today's ${set.posts_per_day}.${prev ? " It uses the preview above." : ""}</div>
+      <div class="btns" style="padding:0"><button class="btn" data-act="confirm-no">Cancel</button><button class="btn primary" data-act="post-now" data-id="${h(m.id)}">Post</button></div></div>`;
+  } else {
+    const can = !m.excluded && (!m.licensed || m.has_original) && st.uses < st.cap;
+    html += `<div class="btns"><button class="btn" data-act="preview" data-id="${h(m.id)}" ${busy || !can ? "disabled" : ""}>${prev ? "New preview" : "Preview next variant"}</button>
+      <button class="btn primary" data-act="confirm" ${busy || !can ? "disabled" : ""}>Post now</button></div>`;
+  }
+  if (hist.length) {
+    const tot = hist.filter((p) => p.variant_views != null).reduce((a, p) => a + p.variant_views, 0);
+    html += `<div class="sec">MADE FROM THIS REEL</div><p class="s" style="margin:0 0 4px">${h(num(tot))} views from ${hist.filter((p) => p.status === "posted").length} trial reels${m.views ? `, ${Math.round((tot / m.views) * 100)}% on top of the original` : ""}</p><div class="list">` + hist.map((p) => `<div class="row"><div class="txt"><div class="t">${h(recipeLabel(p.recipe || (p.style ? [p.style] : [])) || "Trial reel")}</div>
+      <div class="s">${h(fmtTime(p.created_at))}${p.status !== "posted" ? ", " + h(p.status) : ""}</div>${p.status === "posted" ? metricsLine(p) : ""}</div>
+      ${p.variant_permalink ? `<a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>`).join("") + `</div>`;
+  }
+  return html + `</div></div>`;
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (act === "close-bg") { if (e.target === el) { ST.sheet = null; ST.confirm = false; renderLayer(); } return; }
+  if (el.tagName === "INPUT" && el.type !== "radio") return; // handled on change
+  switch (act) {
+    case "nav": ST.view = el.dataset.view; ST.sheet = null; try { localStorage.setItem("trs-view", ST.view); } catch (err) {}
+      if (ST.view === "settings") await api("GET", "/api/log").then((d) => (ST.log = d.log)).catch(() => {});
+      window.scrollTo(0, 0); render(); break;
+    case "filter": ST.filter = el.dataset.f; renderTop(); break;
+    case "range": ST.range = el.dataset.r; renderTop(); break;
+    case "open": ST.sheet = id; ST.confirm = false; renderLayer(); break;
+    case "close": ST.sheet = null; ST.confirm = false; renderLayer(); break;
+    case "sync": start("/api/sync", "Sync"); break;
+    case "step": {
+      const key = el.dataset.key, d = +el.dataset.d;
+      if (key.startsWith("variants:")) {
+        const mid = key.slice(9), m = byId(mid), cur = m.variants_override || ST.state.settings.variants_per_post;
+        await patchMedia(mid, { variants_override: Math.max(1, Math.min(20, cur + d)) });
+      } else await saveSetting(key, ST.state.settings[key] + d);
+      break;
+    }
+    case "edit-type": {
+      const cur = ST.state.settings.edits || [], k = el.dataset.edit;
+      await saveSetting("edits", cur.includes(k) ? cur.filter((x) => x !== k) : cur.concat(k)); break;
+    }
+    case "music": await saveSetting("music", el.value); break;
+    case "del-music":
+      try { await api("DELETE", "/api/music/" + encodeURIComponent(el.dataset.name)); toast("Removed"); await load(true); } catch (err) { toast(err.message); }
+      break;
+    case "resume-guard":
+      try { await api("POST", "/api/guard/resume"); toast("Posting resumed"); await load(true); } catch (err) { toast(err.message); }
+      break;
+    case "save-caption":
+      try { await api("POST", `/api/media/${id}/caption`, { caption: document.getElementById("capedit").value }); toast("Caption saved for this version"); await load(true); } catch (err) { toast(err.message); }
+      break;
+    case "grad": await saveSetting("graduation_strategy", el.value); break;
+    case "move": {
+      const pri = ST.media.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority).map((m) => m.id);
+      const i = pri.indexOf(id), j = i + +el.dataset.d;
+      if (j < 0 || j >= pri.length) break;
+      [pri[i], pri[j]] = [pri[j], pri[i]];
+      try { await api("POST", "/api/priority", { ids: pri }); await load(true); } catch (err) { toast(err.message); }
+      break;
+    }
+    case "unstar": await patchMedia(id, { prioritized: false }); break;
+    case "reset-variants": await patchMedia(id, { variants_override: null }); break;
+    case "preview": start(`/api/media/${id}/preview`, "Preview"); break;
+    case "confirm": ST.confirm = true; renderLayer(); break;
+    case "confirm-no": ST.confirm = false; renderLayer(); break;
+    case "post-now": ST.confirm = false; start(`/api/media/${id}/post`, "Posting"); break;
+    case "edit": ST.editing[el.dataset.k] = true; renderTop(); break;
+    case "save-ig": {
+      const v = document.getElementById("igtok").value.trim();
+      if (!v) { toast("Paste the token first"); break; }
+      try { toast("Saving"); await api("POST", "/api/secrets", { ig_token: v }); ST.editing.ig = false; toast("Saved. Syncing your reels, about a minute."); ST.busyAction = "Sync"; wasBusy = true; await load(true); setTimeout(poll, 4000); }
+      catch (err) { toast(err.message); }
+      break;
+    }
+    case "save-claude": {
+      const v = document.getElementById("clkey").value.trim();
+      try { await api("POST", "/api/secrets", { anthropic_key: v }); ST.editing.claude = false; toast(v ? "Key saved" : "Key removed"); await load(false); }
+      catch (err) { toast(err.message); }
+      break;
+    }
+    case "refresh-token":
+      try { const d = await api("POST", "/api/refresh-token"); toast(d.refreshed ? "Renewal started on GitHub" : "Too soon to renew. Instagram needs it to be a day old."); ST.busyAction = "Renewal"; wasBusy = true; await load(false); setTimeout(poll, 4000); }
+      catch (err) { toast(err.message); }
+      break;
+    case "logout": BACK.disconnect(); location.reload(); break;
+  }
+});
+document.addEventListener("change", async (e) => {
+  const el = e.target, act = el.dataset && el.dataset.act;
+  if (!act) return;
+  const id = el.dataset.id;
+  if (act === "enabled") await saveSetting("enabled", el.checked);
+  if (act === "include") await patchMedia(id, { excluded: !el.checked });
+  if (act === "prioritize") await patchMedia(id, { prioritized: el.checked });
+  if (act === "ai") await saveSetting("caption_mode", el.checked ? "ai" : "original");
+  if (act === "mentions") await saveSetting("strip_mentions", el.checked);
+  if (act === "backup") await saveSetting("backup_host", el.checked);
+  if (act === "winners") await saveSetting("winners_first", el.checked);
+  if (act === "hookmove") await saveSetting("hook_mode", el.checked ? "move" : "repeat");
+  if (act === "deadair") await saveSetting("cut_dead_air", el.checked);
+  if (act === "pacing") await saveSetting("vary_pacing", el.checked);
+  if (act === "commenter") await saveSetting("show_commenter", el.checked);
+  if (act === "guardrails") await saveSetting("guardrails", el.checked);
+  if (act === "upload-music" && el.files[0]) {
+    const fd = new FormData(); fd.append("file", el.files[0]);
+    toast("Uploading");
+    try { await api("POST", "/api/music", fd); toast("Track added"); await load(true); } catch (err) { toast(err.message); }
+  }
+  if (act === "time" && el.value) await saveSetting(el.dataset.key, el.value);
+  if (act === "tz") await saveSetting("timezone", el.value);
+  if (act === "voice") await saveSetting("voice", el.value);
+  if (act === "upload" && el.files[0]) {
+    const fd = new FormData(); fd.append("file", el.files[0]);
+    toast("Uploading");
+    try { await api("POST", `/api/media/${id}/original`, fd); toast("Original saved"); await load(true); } catch (err) { toast(err.message); }
+  }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && ST.sheet) { ST.sheet = null; ST.confirm = false; renderLayer(); } });
+
+function renderSetup(err) {
+  document.getElementById("nav").innerHTML = "";
+  const repo = (BACK && BACK.repo()) || "";
+  document.getElementById("app").innerHTML = `<header class="top gut"><h1>Trial Reels Studio</h1></header>
+  <section class="gut" style="padding-block:24px;display:grid;gap:14px;max-width:460px">
+    <h2 style="margin:0;font-size:22px">Connect this device</h2>
+    <p class="s" style="margin:0;color:var(--muted)">Paste the GitHub token you made for this app. It stays on this device and only works with your private studio repository.</p>
+    <label class="t" for="srepo">Repository</label><input class="field" id="srepo" value="${h(repo)}" placeholder="your-name/trial-reels-studio" autocomplete="off">
+    <label class="t" for="stok">GitHub token</label><input class="field" id="stok" type="password" placeholder="github_pat_..." autocomplete="off">
+    ${err ? `<p class="note" style="color:var(--danger)">${h(err)}</p>` : ""}
+    <button class="btn primary" data-act="connect" id="sgo">Connect</button>
+  </section>`;
+}
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest("[data-act=connect]");
+  if (!el) return;
+  el.disabled = true; el.textContent = "Connecting";
+  try { await BACK.connect(document.getElementById("stok").value, document.getElementById("srepo").value); boot(); }
+  catch (err) { renderSetup(err.message); }
+});
+function boot() {
+  if (!DEMO && !BACK.configured()) { renderSetup(); return; }
+  load(true).then(() => { wasBusy = !!(ST.state && ST.state.job); setTimeout(poll, wasBusy ? 4000 : 30000); })
+    .catch((e) => {
+      if (!DEMO && /token|Reconnect/i.test(e.message)) { renderSetup(e.message); return; }
+      document.getElementById("app").innerHTML = `<div class="empty gut"><h2>Couldn't load</h2><p>${h(e.message)}</p></div>`;
+    });
+}
+boot();
+})();
+</script>
+</body>
+</html>
