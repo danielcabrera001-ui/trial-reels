@@ -68,8 +68,9 @@ svg { display: block }
 .panel .t { font-weight: 600 }
 .panel .s { color: var(--muted); font-size: 13px }
 
-.tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line) }
-.tab { border: 0; background: none; padding: 11px 0 10px; display: flex; justify-content: center; align-items: center; gap: 6px; color: var(--muted); border-top: 1px solid transparent; margin-top: -1px; font-size: 12px; font-weight: 600; letter-spacing: .3px }
+.tabs { display: grid; grid-auto-columns: 1fr; grid-auto-flow: column; border-top: 1px solid var(--line) }
+.tab { border: 0; background: none; padding: 11px 0 10px; display: flex; justify-content: center; align-items: center; gap: 5px; color: var(--muted); border-top: 1px solid transparent; margin-top: -1px; font-size: 11.5px; font-weight: 600; letter-spacing: .2px; white-space: nowrap; min-width: 0 }
+.tile .cmark { position: absolute; right: 6px; bottom: 6px; display: flex; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)) }
 .tab[aria-selected="true"] { color: var(--fg); border-top-color: var(--fg) }
 
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px }
@@ -237,10 +238,12 @@ input[type="time"].field { width: auto }
   function status(m, uses, s, at, winner = false) {
     const cap = capFor(m, s), n = uses.length;
     const base = { uses: n, cap, eligible: false, reason: "", ready_at: null, winner };
-    if (m.is_variant) return { ...base, reason: "Trial reel made by this app" };
+    if (m.is_variant) return { ...base, reason: m.trial_by === "buzzfy" ? "Trial reel made by Buzzfy" : "Trial reel made by this app" };
     if (m.available === 0 || m.available === false) return { ...base, reason: "No longer on your profile" };
     if (m.excluded) return { ...base, reason: "Omitted" };
-    if (!hasSource(m)) return { ...base, reason: "Uses licensed music, upload the original to include it" };
+    if (!hasSource(m)) return { ...base, reason: m.collab ? "Instagram won't share this collab's video (licensed music or downloads off)"
+      : "Uses licensed music, upload the original to include it" };
+    if (m.licensed && m.voice_with_song) return { ...base, reason: "Your voice is mixed with the licensed song, so it can't be swapped" };
     if (m.views == null) return { ...base, reason: "Waiting for view count" };
     if (n >= cap) return { ...base, reason: `All ${cap} variants made` };
     const old = parseTs(m.timestamp) + Number(s.min_age_days) * DAY;
@@ -298,10 +301,55 @@ input[type="time"].field { width: auto }
     const t = new Date(Date.UTC(y, mo - 1, d + k));
     return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
   }
-  function slotsForDay(day, s) {
+  /* Automatic posting times, mirroring studio/planner.py */
+  const BUCKET_HOURS = [7, 9, 11, 13, 15, 17, 19, 21];
+  const EXPLORE_ORDER = [5, 2, 6, 1, 4, 3, 7, 0];
+  const UCB_C = 0.8, STATS_LAG = 36 * HOUR;
+  const hmMin = (hm) => { const [h, m] = (hm || "09:00").split(":").map(Number); return h * 60 + m; };
+  function bucketOf(ms, s) {
+    const h = parts(ms, s.timezone || "UTC").h;
+    for (let i = 0; i < BUCKET_HOURS.length; i++) if (BUCKET_HOURS[i] <= h && h < BUCKET_HOURS[i] + 2) return i;
+    return null;
+  }
+  function allowedBuckets(s) {
+    const ws = hmMin(s.window_start), we = hmMin(s.window_end);
+    return BUCKET_HOURS.map((b, i) => [b * 60 + 30, i]).filter(([t]) => ws <= t && t <= we).map(([, i]) => i);
+  }
+  function timingStats(posts, s, before = null) {
+    const out = {};
+    for (const p of successful(posts)) {
+      const d1 = (p.checks || {}).d1;
+      if (d1 == null) continue;
+      const at = parseTs(p.created_at);
+      if (before != null && at >= before - STATS_LAG) continue;
+      const b = bucketOf(at, s);
+      if (b == null) continue;
+      const r = out[b] || (out[b] = { n: 0, sum: 0, views: [] });
+      r.n += 1; r.sum += Math.log1p(Math.max(0, d1)); r.views.push(d1);
+    }
+    return out;
+  }
+  function bestBuckets(posts, s, day, n) {
+    const allowed = allowedBuckets(s);
+    const stats = timingStats(posts, s, zoned(day, "00:00", s.timezone || "UTC"));
+    const total = Object.values(stats).reduce((a, r) => a + r.n, 0);
+    const key = (i) => {
+      const r = stats[i];
+      if (!r) return [0, 0, EXPLORE_ORDER.indexOf(i)];
+      const ucb = r.sum / r.n + UCB_C * Math.sqrt(Math.log(total + 1) / r.n);
+      return [1, -Math.floor(ucb * 1e6), EXPLORE_ORDER.indexOf(i)];
+    };
+    const cmp = (a, b) => { const ka = key(a), kb = key(b); for (let j = 0; j < 3; j++) if (ka[j] !== kb[j]) return ka[j] - kb[j]; return 0; };
+    return allowed.slice().sort(cmp).slice(0, n).sort((a, b) => a - b);
+  }
+  const musicFor = (useIndex, s, m = null) => (m && m.licensed ? true : s.music === "instagram" && useIndex % 2 === 1);
+  function slotsForDay(day, s, posts = null) {
     const n = Math.max(0, Math.min(Number(s.posts_per_day), 10));
     if (!n) return [];
     const tz = s.timezone || "UTC";
+    if (s.timing === "auto" && n <= allowedBuckets(s).length) {
+      return bestBuckets(posts || [], s, day, n).map((i) => zoned(day, `${pad(BUCKET_HOURS[i])}:30`, tz));
+    }
     const start = zoned(day, s.window_start, tz);
     let end = zoned(day, s.window_end, tz);
     if (end <= start) end = start + HOUR;
@@ -318,7 +366,7 @@ input[type="time"].field { width: auto }
   function dueNow(posts, s, now, guard = null) {
     if (!s.enabled || guardBlocks(guard, s)) return false;
     const day = localDay(now, s);
-    const passed = slotsForDay(day, s).filter((t) => t <= now);
+    const passed = slotsForDay(day, s, posts).filter((t) => t <= now);
     const done = postsOnDay(posts, day, s).length;
     if (done >= passed.length || done >= Number(s.posts_per_day)) return false;
     const failed = postsOnDay(posts, day, s, ["failed"]);
@@ -332,13 +380,13 @@ input[type="time"].field { width: auto }
     const day = localDay(now, s);
     const doneToday = postsOnDay(posts, day, s).length;
     for (let d = 0; d < 45; d++) {
-      let slots = slotsForDay(addDays(day, d), s);
+      let slots = slotsForDay(addDays(day, d), s, posts);
       if (d === 0) slots = slots.slice(doneToday);
       for (const t of slots) {
         const at = Math.max(t, now);
         const c = pick(media, sim, s, at);
         if (!c) continue;
-        out.push({ time: new Date(at).toISOString(), media_id: c.media.id, use_index: c.use_index, recipe: c.recipe, cap: capFor(c.media, s) });
+        out.push({ time: new Date(at).toISOString(), media_id: c.media.id, use_index: c.use_index, recipe: c.recipe, cap: capFor(c.media, s), music: musicFor(c.use_index, s, c.media) });
         sim.push({ source_id: c.media.id, status: "posted", created_at: new Date(at).toISOString() });
         if (out.length >= n) return out;
       }
@@ -374,7 +422,7 @@ input[type="time"].field { width: auto }
   function results(media, posts, st, s, now) {
     const byId = {};
     for (const m of media) byId[m.id] = m;
-    const originals = media.filter((m) => !m.is_variant && m.views != null);
+    const originals = media.filter((m) => !m.is_variant && !m.collab && m.views != null);
     const typical = median(originals.map((m) => m.views));
     const done = successful(posts);
     const start = done.length ? Math.min(...done.map((p) => parseTs(p.created_at))) : null;
@@ -424,13 +472,29 @@ input[type="time"].field { width: auto }
                winners: measured.filter(isWin).length, last: Math.max(...ps.map((p) => parseTs(p.created_at))) };
     }).sort((a, b) => b.total - a.total);
     const failed30 = posts.filter((p) => p.status === "failed" && now - parseTs(p.created_at) < 30 * DAY).length;
-    return { typical, start: start != null ? new Date(start).toISOString() : null,
+    /* best posting times: day-1 views by 2-hour slot */
+    const ts = timingStats(posts, s), allowed = allowedBuckets(s);
+    const timing = BUCKET_HOURS.map((hr, i) => ({ bucket: i, hour: hr, allowed: allowed.includes(i), n: (ts[i] || { n: 0 }).n,
+      median_d1: ts[i] ? median(ts[i].views) : null }));
+    /* music: versions with an Instagram track vs without */
+    const measuredAll = done.filter((p) => p.variant_views != null);
+    const withM = measuredAll.filter((p) => p.audio), without = measuredAll.filter((p) => !p.audio);
+    const music = { with: { n: withM.length, median: median(withM.map((p) => p.variant_views)) },
+                    without: { n: without.length, median: median(without.map((p) => p.variant_views)) },
+                    tracks: withM.map((p) => ({ name: [p.audio.title, p.audio.artist].filter(Boolean).join(" by "), query: p.audio.query, views: p.variant_views }))
+                      .sort((a, b) => b.views - a.views).slice(0, 8) };
+    /* Buzzfy's trial reels on the same account, as a baseline */
+    const bz = media.filter((m) => m.trial_by === "buzzfy" && m.views != null);
+    const buzzfy = bz.length ? { count: bz.length, median: median(bz.map((m) => m.views)), views: bz.reduce((a, m) => a + m.views, 0) } : null;
+    const fromCollabs = done.filter((p) => byId[p.source_id] && byId[p.source_id].collab).length;
+    return { typical, start: start != null ? new Date(start).toISOString() : null, timing, music, buzzfy, from_collabs: fromCollabs,
              last30: windowStats(now - 30 * DAY), all: windowStats(-Infinity), reach, reach_cmp: reachCmp,
              followers, followers_cmp: fol, per_reel: perReel, failed_30: failed30,
              guard: (st && st.guard) || null };
   }
   const api = { results, EDIT_TYPES, parseTs, usesBySource, capFor, hasSource, recipesFor, recipeFor, isWinner, status, order, pick,
-    localDay, addDays, slotsForDay, postsOnDay, guardBlocks, dueNow, simulate, minutesEstimate, editStats };
+    localDay, addDays, slotsForDay, postsOnDay, guardBlocks, dueNow, simulate, minutesEstimate, editStats,
+    BUCKET_HOURS, bucketOf, allowedBuckets, timingStats, bestBuckets, musicFor };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.TRS_PLANNER = api;
 })(typeof window !== "undefined" ? window : globalThis);
@@ -607,18 +671,25 @@ input[type="time"].field { width: auto }
     s.posts_per_day = Math.max(0, Math.min(Number(s.posts_per_day || 0), 10));
     return s;
   };
+  /* mirrors store.merged_media() */
   function media() {
+    const ex = D.export || {}, voice = new Set(ex.voice_with_song || []);
     return (D.catalog.media || []).map((m) => {
       const c = D.controls[m.id] || {}, a = D.analysis[m.id] || {};
-      return { ...m, analyzed: a.analyzed || null, has_speech: a.has_speech ?? null, has_text: a.has_text ?? null,
+      const original = !!(c.original || m.has_original);
+      const licensed = original && !m.has_url && !m.collab;
+      const row = { ...m, analyzed: a.analyzed || null, has_speech: a.has_speech ?? null, has_text: a.has_text ?? null,
                opening_ok: a.opening_ok ?? null, comment_ok: a.comment_ok ?? null,
                excluded: c.excluded ? 1 : 0, priority: c.priority ?? null, variants_override: c.variants_override || null,
-               original: !!(c.original || m.has_original) };
+               original, has_original: original, licensed, voice_with_song: voice.has(m.id),
+               music_genres: (ex.music_genres || {})[m.id] || null };
+      if (licensed) { row.has_speech = false; row.opening_ok = false; }
+      return row;
     });
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -626,8 +697,9 @@ input[type="time"].field { width: auto }
       gh("GET", `${R()}/actions/secrets`).catch(() => ({ secrets: [] })),
       readJSON("data/analysis.json", {}),
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
+      readJSON("data/export.json", {}),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -693,6 +765,7 @@ input[type="time"].field { width: auto }
       const thumbs = D.thumbs || {};
       return { account: { ...(D.catalog.account || {}), avatar: thumbs.avatar || null }, settings: s,
                instagram: { connected: !!ig, days_left: days }, claude_key: !!D.secrets.ANTHROPIC_API_KEY,
+               fb_token: !!D.secrets.FB_ACCESS_TOKEN, fb: D.status.fb || null,
                today: { posted: done, planned: slots.length, next: next ? new Date(next).toISOString() : null },
                last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
                repo: cfg.repo, minutes: P.minutesEstimate(s),
@@ -705,7 +778,7 @@ input[type="time"].field { width: auto }
       for (const q of P.simulate(list, D.history, s, now, 60)) if (!next[q.media_id]) next[q.media_id] = q.time;
       const out = list.filter((m) => !m.is_variant && m.available !== 0).map((m) => {
         const u = uses[m.id] || [], c = D.controls[m.id] || {};
-        return { ...m, thumb: D.thumbs[m.id] || null, licensed: !m.has_url, has_original: m.original,
+        return { ...m, thumb: D.thumbs[m.id] || null, locked: !m.has_url && !m.original, song_swap: m.licensed,
           status: P.status(m, u, s, now, P.isWinner(m, D.history, s, now)), next_at: next[m.id] || null,
           next_recipe: P.recipeFor(u.length, m, s), analysis: D.analysis[m.id] || null,
           next_caption: c.next_caption && c.next_caption_use === u.length ? c.next_caption : null,
@@ -720,6 +793,11 @@ input[type="time"].field { width: auto }
     if (path === "/api/results") {
       const out = P.results(media(), D.history, D.status, s, now);
       out.minutes = await minutesThisMonth();
+      /* follows per week before the app started, from your Instagram download */
+      const fb = (D.export || {}).follows_by_day || {};
+      const until = out.start ? P.parseTs(out.start) : now, from = until - 84 * 864e5;
+      const n = Object.entries(fb).filter(([d]) => { const t = Date.parse(d + "T12:00:00Z"); return t >= from && t < until; }).reduce((a, [, v]) => a + v, 0);
+      if (Object.keys(fb).length) out.follows_before = { per_week: n / 12, weeks: 12 };
       return out;
     }
     if (path === "/api/insights") {
@@ -755,7 +833,9 @@ input[type="time"].field { width: auto }
         let v = v0;
         if (RANGES[k]) v = Math.max(RANGES[k][0], Math.min(parseInt(v, 10) || 0, RANGES[k][1]));
         if (k === "edits") v = P.EDIT_TYPES.filter((x) => v.includes(x));
-        if (k === "music" && !["off", "library", "ambient"].includes(v)) continue;
+        if (k === "music" && !["off", "library", "ambient", "instagram"].includes(v)) continue;
+        if (k === "timing" && !["auto", "fixed"].includes(v)) continue;
+        if (k === "music_styles") v = (Array.isArray(v) ? v : String(v).split(",")).map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
         if (k === "hook_mode" && !["move", "repeat"].includes(v)) continue;
         next[k] = v;
       }
@@ -775,6 +855,11 @@ input[type="time"].field { width: auto }
     if (path === "/api/refresh-token") { await dispatch("refresh-token"); return { refreshed: "started" }; }
     if (path === "/api/secrets") {
       if (body.ig_token) { await setSecret("IG_ACCESS_TOKEN", body.ig_token); await loadAll(); await dispatch("sync"); }
+      if (body.fb_token !== undefined) {
+        if (body.fb_token) await setSecret("FB_ACCESS_TOKEN", body.fb_token);
+        else await gh("DELETE", `${R()}/actions/secrets/FB_ACCESS_TOKEN`).catch(() => {});
+        await loadAll(); await dispatch("sync");
+      }
       if (body.anthropic_key !== undefined) {
         if (body.anthropic_key) await setSecret("ANTHROPIC_API_KEY", body.anthropic_key);
         else await gh("DELETE", `${R()}/actions/secrets/ANTHROPIC_API_KEY`).catch(() => {});
@@ -908,6 +993,7 @@ const I = {
   eyeOff: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   eyeOffBig: '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   music: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  people: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.4 3-5.4 6-5.4s5.4 2 6 5.4"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.7c2.4.3 4 2 4.5 4.8"/></svg>',
   up: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>',
   down: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   minus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>',
@@ -951,7 +1037,7 @@ function placeholder(m) {
 function statusChip(m) {
   const st = m.status;
   if (m.excluded) return '<span class="chip red">Omitted</span>';
-  if (m.licensed && !m.has_original) return '<span class="chip amber">Licensed music</span>';
+  if (m.locked) return `<span class="chip amber">${m.collab ? "Video not shared" : "Licensed music"}</span>`;
   if (st.eligible && m.next_at) return `<span class="chip blue">Up next ${h(fmtTime(m.next_at))}</span>`;
   if (st.eligible) return '<span class="chip green">Ready</span>';
   if (st.reason === "Cooling down" || st.reason === "Too new") return `<span class="chip">${h(st.reason)} until ${h(fmtDate(st.ready_at))}</span>`;
@@ -1060,8 +1146,9 @@ function scheduleLine() {
 function viewProfile() {
   const s = ST.state, acct = s.account || {};
   const reels = ST.media;
-  const counts = { all: reels.length, priority: reels.filter((m) => m.priority != null).length, omitted: reels.filter((m) => m.excluded).length };
+  const counts = { all: reels.length, collab: reels.filter((m) => m.collab).length, priority: reels.filter((m) => m.priority != null).length, omitted: reels.filter((m) => m.excluded).length };
   let list = reels;
+  if (ST.filter === "collab") list = reels.filter((m) => m.collab);
   if (ST.filter === "priority") list = reels.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
   if (ST.filter === "omitted") list = reels.filter((m) => m.excluded);
   const firstNext = ST.queue[0] && ST.queue[0].media_id;
@@ -1072,21 +1159,22 @@ function viewProfile() {
     <div class="panel"><div class="txt"><div class="t">Trial reels</div><div class="s">${h(scheduleLine())}</div></div>
     ${s.instagram.connected ? sw("enabled-top", s.settings.enabled, "enabled", 'aria-label="Posting on or off"') : '<button class="btn primary" data-act="nav" data-view="settings">Connect</button>'}</div>${guardBanner()}</section>`;
   html += `<div class="tabs gut" role="tablist">
-    ${[["all", I.grid, "All"], ["priority", I.starO, "Priority"], ["omitted", I.eyeOff, "Omitted"]].map(([k, ic, l]) =>
+    ${[["all", I.grid, "All"], ["collab", I.people.replace('width="12" height="12"', 'width="16" height="16"'), "Collabs"], ["priority", I.starO, "Priority"], ["omitted", I.eyeOff, "Omitted"]].filter(([k]) => k !== "collab" || counts.collab).map(([k, ic, l]) =>
       `<button class="tab" role="tab" aria-selected="${ST.filter === k}" data-act="filter" data-f="${k}">${ic.replace('width="24" height="24"', 'width="16" height="16"')}${l.toUpperCase()} ${counts[k] ? counts[k] : ""}</button>`).join("")}</div>`;
   if (!s.instagram.connected && !reels.length) {
     return html + `<div class="empty gut"><h2>Connect your Instagram</h2><p>Add your access token in Settings and your reels show up here, ranked and ready.</p></div>`;
   }
   if (!list.length) {
-    const msg = { all: "No reels yet. Tap sync to pull them in.", priority: "Star a reel to send it to the front of the line.", omitted: "Nothing omitted. Tap a reel and turn off Use for trial reels to keep it out." }[ST.filter];
+    const msg = { all: "No reels yet. Tap sync to pull them in.", collab: "No collab reels found yet.", priority: "Star a reel to send it to the front of the line.", omitted: "Nothing omitted. Tap a reel and turn off Use for trial reels to keep it out." }[ST.filter];
     return html + `<div class="empty gut"><p>${msg}</p></div>`;
   }
   html += `<div class="gut"><div class="grid">` + list.map((m) => {
     const off = m.excluded;
     const left = m.priority != null ? `<span class="pill star">${I.star}${h(rankOf(m))}</span>` : (m.id === firstNext ? '<span class="pill next">Next</span>' : (m.status.winner ? '<span class="pill star">Winner</span>' : "<span></span>"));
-    const right = m.licensed && !m.has_original ? `<span class="pill" title="Licensed music">${I.music}</span>` : (m.status.uses ? `<span class="pill">${m.status.uses}/${m.status.cap}</span>` : "");
+    const right = m.locked ? `<span class="pill" title="${m.collab ? "Video not shared" : "Licensed music"}">${I.music}</span>` : (m.status.uses ? `<span class="pill">${m.status.uses}/${m.status.cap}</span>` : "");
+    const cmark = m.collab ? `<span class="cmark" title="Collab with @${h(m.owner || "")}">${I.people.replace('width="12" height="12"', 'width="15" height="15"')}</span>` : "";
     return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="Reel with ${h(num(m.views))} views">
-      ${placeholder(m)}<span class="badges">${left}${right}</span>
+      ${placeholder(m)}<span class="badges">${left}${right}</span>${cmark}
       ${off ? `<span class="officon">${I.eyeOffBig}</span>` : ""}
       <span class="views">${I.play}${h(num(m.views))}</span></button>`;
   }).join("") + `</div></div>`;
@@ -1111,12 +1199,13 @@ function viewQueue() {
       <button class="mini" data-act="move" data-id="${h(m.id)}" data-d="1" aria-label="Move down" ${i === pri.length - 1 ? "disabled" : ""}>${I.down}</button>
       <button class="mini" data-act="unstar" data-id="${h(m.id)}" aria-label="Remove from priority">${I.x}</button></div>`).join("") + `</div>`;
   html += `<div class="sec">SCHEDULE</div>`;
+  if (s.settings.timing === "auto") html += `<p class="note">Times are picked automatically: the app tries each 2-hour slot in your allowed hours, then leans toward the slots whose trial reels get the most views on day 1.</p>`;
   if (!ST.queue.length) html += `<p class="note">${s.settings.posts_per_day ? "Nothing is ready. Reels may be omitted, too new, cooling down, or out of variants." : "Trial reels per day is set to 0."}</p>`;
   else html += `<div class="list">` + ST.queue.map((q) => {
     const m = byId(q.media_id) || { id: q.media_id };
     return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(m.id)}">
       <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t qtime">${h(fmtTime(q.time))}</div>
-      <div class="s">Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}, from a reel with ${h(num(m.views))} views${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
+      <div class="s">Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}${q.music ? ", with a new track" : ""}, from ${m.collab ? `a collab with @${h(m.owner || "")}` : "a reel"} with ${h(num(m.views))} views${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
   }).join("") + `</div>`;
   return html + `</section>`;
 }
@@ -1188,6 +1277,13 @@ function signalsHtml(r, w) {
     const rate = w.beat / w.measured;
     sig(rate >= 0.15 ? "up" : rate === 0 && w.measured >= 10 ? "down" : "flat", `${w.beat} of ${w.measured} beat your typical reel`, `${Math.round(rate * 100)}% hit rate. Buzzfy's published figure is 19 in 100 for accounts with 1K to 20K followers.`);
   }
+  if (r.buzzfy) {
+    const ours = w.median;
+    sig(ours != null && ours > r.buzzfy.median ? "up" : "flat", `Buzzfy's trial reels: ${num(r.buzzfy.median)} views each`,
+      `Median of ${r.buzzfy.count} trial reel${r.buzzfy.count === 1 ? "" : "s"} Buzzfy posted on this account${ours != null ? `. This app's median: ${num(ours)}.` : ". This app's numbers show up here once its trial reels have results."}`);
+  }
+  if (r.follows_before) sig("flat", `Before: about ${num(Math.round(r.follows_before.per_week))} new followers a week`,
+    `Average of the 12 weeks before ${r.start ? "you started" : "today"}, from your Instagram download. It counts people who still follow you.`);
   if (r.followers_cmp) {
     const pw = r.followers_cmp.per_week;
     sig(pw > 0 ? "up" : pw < 0 ? "down" : "flat", `${pw >= 0 ? "+" : ""}${num(Math.round(pw))} followers a week`, `Since ${fmtDate(r.followers_cmp.since_day + "T12:00:00Z")}. Followers come from many things, so read this together with reach.`);
@@ -1224,11 +1320,27 @@ function viewPosted() {
       <div class="t">${h(EDIT_LABEL[e.edit] || e.edit)}</div><div class="s">${e.count} trial reel${e.count === 1 ? "" : "s"}${e.median_share != null ? `, ${Math.round(e.median_share * 100)}% of the original's views` : ""}</div></div>
       <div class="qtime">${h(num(e.median_views))}</div></div>`).join("") + `</div><p class="note">Median views per trial reel. Turn off edits that lag in Settings.</p>`;
   }
+  const tried = (r.timing || []).filter((t) => t.n);
+  if (tried.length) {
+    const best = tried.reduce((a, t) => (!a || t.median_d1 > a.median_d1 ? t : a), null);
+    const hr = (x) => new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2026, 0, 1, x)));
+    html += `<div class="sec">BEST TIMES TO POST</div><div class="list">` + r.timing.filter((t) => t.allowed || t.n).map((t) => `<div class="row"><div class="txt">
+      <div class="t">${h(hr(t.hour))} to ${h(hr(t.hour + 2))}${best && t.bucket === best.bucket ? ' <span class="chip green">Best so far</span>' : ""}</div>
+      <div class="s">${t.n ? `${t.n} trial reel${t.n === 1 ? "" : "s"}, median day-1 views` : "Not tried yet"}</div></div>
+      <div class="qtime">${t.n ? h(num(t.median_d1)) : "--"}</div></div>`).join("") + `</div><p class="note">${ST.state.settings.timing === "auto" ? "The schedule uses these automatically." : "Turn on automatic times in Settings to use these."}</p>`;
+  }
+  if (r.music && r.music.with.n) {
+    html += `<div class="sec">BY MUSIC</div><div class="list">
+      <div class="row"><div class="txt"><div class="t">With a track from Instagram's library</div><div class="s">${r.music.with.n} trial reels</div></div><div class="qtime">${h(num(r.music.with.median))}</div></div>
+      <div class="row"><div class="txt"><div class="t">Without</div><div class="s">${r.music.without.n} trial reels</div></div><div class="qtime">${h(num(r.music.without.median))}</div></div>
+      ${r.music.tracks.map((t) => `<div class="row"><div class="txt"><div class="t">${h(t.name || "Track")}</div><div class="s">${t.query && t.query !== "trending" ? "Picked for: " + h(t.query) : "Trending"}</div></div><div class="qtime">${h(num(t.views))}</div></div>`).join("")}
+    </div><p class="note">Median views per trial reel.</p>`;
+  }
   if (r.per_reel.length) {
     html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
       const m = byId(x.id) || { id: x.id };
       return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(x.id)}">
-        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}</div>
+        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}${m.collab ? ` <span class="chip">Collab</span>` : ""}</div>
         <div class="s">Original: ${h(num(x.views))}${x.best ? `. Best version: ${h(num(x.best.views))}, ${h(recipeLabel(x.best.recipe))}` : ""}${x.winners ? `. ${x.winners} winner${x.winners === 1 ? "" : "s"}` : ""}</div></div>
         <span class="chip ${x.lift != null && x.lift >= 0.5 ? "green" : ""}">${x.lift == null ? "--" : "+" + Math.round(x.lift * 100) + "%"}</span></button>`;
     }).join("") + `</div><p class="note">The percentage is extra views on top of the original, from all its trial reels.</p>`;
@@ -1246,7 +1358,7 @@ function viewPosted() {
     const chip = p.status === "posted" ? "" : p.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip blue">Posting</span>';
     return `<div class="row"><div class="thumb" style="${tileBg(m)}"></div><div class="txt">
       <div class="t">${h(recipeLabel(p.recipe || (p.style ? [p.style] : [])) || "Trial reel")}</div>
-      <div class="s">${h(fmtTime(p.created_at))}, version ${(p.use_index ?? 0) + 1}${p.sub_style ? ", " + h(SUB_LABEL[p.sub_style] || p.sub_style) + " subtitles" : ""}${p.trigger === "manual" ? ", posted by you" : ""}${p.variant_permalink ? ` · <a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
+      <div class="s">${h(fmtTime(p.created_at))}, version ${(p.use_index ?? 0) + 1}${p.sub_style ? ", " + h(SUB_LABEL[p.sub_style] || p.sub_style) + " subtitles" : ""}${p.audio ? ", music: " + h([p.audio.title, p.audio.artist].filter(Boolean).join(" by ")) : ""}${p.collaborators && p.collaborators.length ? ", with " + h(p.collaborators.map((u) => "@" + u).join(" ")) : ""}${p.trigger === "manual" ? ", posted by you" : ""}${p.variant_permalink ? ` · <a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
       ${p.status === "posted" ? metricsLine(p) : ""}
       ${p.status === "failed" ? `<div class="s" style="color:var(--danger)">${h(p.error || "")}</div>` : ""}</div>${chip}</div>`;
   }).join("") + `</div></section>`;
@@ -1262,9 +1374,10 @@ function viewSettings() {
   return `<section class="gut">
   <div class="sec">POSTING</div><div class="list">
     <div class="row"><div class="txt"><div class="t">Post trial reels</div><div class="s">${set.enabled ? "On" : "Paused"}</div></div>${sw("enabled-s", set.enabled, "enabled", 'aria-label="Post trial reels"')}</div>
-    <div class="row"><div class="txt"><div class="t">Trial reels per day</div><div class="s">Spread evenly across your posting window</div></div>${stepper("posts_per_day", set.posts_per_day, 0, s.hard_max, "Trial reels per day")}</div>
+    <div class="row"><div class="txt"><div class="t">Trial reels per day</div><div class="s">${set.timing === "auto" ? "At the best times found so far" : "Spread evenly across your posting window"}</div></div>${stepper("posts_per_day", set.posts_per_day, 0, s.hard_max, "Trial reels per day")}</div>
+    <div class="row"><div class="txt"><div class="t">Find the best times automatically</div><div class="s">${set.timing === "auto" ? "Tries each 2-hour slot in the hours below, then leans toward the ones with the most views on day 1, while still testing the others now and then" : "Off: posts at evenly spaced times in your window"}</div></div>${sw("timing", set.timing === "auto", "timing")}</div>
     ${many ? `<p class="note warn">More than 3 a day makes it more likely Instagram sees them as repetitive and shows them to fewer people.</p>` : ""}
-    <div class="row" style="display:block"><div class="t">Posting window</div><div class="s">Trial reels go out between these times</div>
+    <div class="row" style="display:block"><div class="t">${set.timing === "auto" ? "Allowed hours" : "Posting window"}</div><div class="s">${set.timing === "auto" ? "The app only tests times between these" : "Trial reels go out between these times"}</div>
       <div style="display:flex;gap:8px;align-items:center;padding-top:8px"><input class="field" type="time" id="ws" value="${h(set.window_start)}" data-act="time" data-key="window_start" aria-label="Window start">
       <span class="s">to</span><input class="field" type="time" id="we" value="${h(set.window_end)}" data-act="time" data-key="window_end" aria-label="Window end"></div></div>
     <div class="row"><div class="txt"><div class="t">Time zone</div></div><select class="field" id="tz" style="width:auto;max-width:55%" data-act="tz">${zones.map((z) => `<option ${z === set.timezone ? "selected" : ""}>${h(z)}</option>`).join("")}</select></div>
@@ -1284,7 +1397,10 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Show the commenter's name</div><div class="s">On comment cards. Off shows "Reply to a comment".</div></div>${sw("commenter", set.show_commenter, "commenter")}</div>
   </div>
   <div class="sec">BACKGROUND MUSIC</div><div class="list">
-    ${[["off", "Off", "Keep the original sound only"], ["library", "Your tracks", "Rotates through the tracks below, softly under your voice"], ["ambient", "Soft ambient pad", "A quiet generated tone bed, no licensing needed"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="music" id="mu-${v}" data-act="music" value="${v}" ${set.music === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
+    ${[["off", "Off", "Keep the original sound only"], ["instagram", "Instagram's music library", s.fb_token ? "Every other version gets a popular track close to the original's genre, so you can see whether music helps. Instagram licenses it." : "Needs the Facebook token under Connections. Every other version gets a popular track close to the original's genre."], ["library", "Your tracks", "Rotates through the tracks below, softly under your voice"], ["ambient", "Soft ambient pad", "A quiet generated tone bed, no licensing needed"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="music" id="mu-${v}" data-act="music" value="${v}" ${set.music === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
+    ${set.music === "instagram" ? `<div class="row" style="display:block"><label class="t" for="mstyles">Styles to try</label><div class="s">Used when the original's genre isn't known. "trending" means Instagram's popular tracks right now. Separate with commas.</div>
+      <input class="field" id="mstyles" data-act="mstyles" value="${h((set.music_styles || []).join(", "))}" style="margin-top:8px"></div>` : ""}
+    <p class="note">Reels Instagram locks for licensed music can still be used if you add the original video: the song is taken out and a new track goes in.</p>
     ${(s.music || []).map((f) => `<div class="row"><div class="txt"><div class="t">${h(f.name)}</div></div><button class="mini" data-act="del-music" data-name="${h(f.name)}" aria-label="Remove ${h(f.name)}">${I.x}</button></div>`).join("")}
     <div class="row" style="display:block"><label class="t" for="musicup">Add a track</label><div class="s">Only music you have the rights to, like royalty-free libraries. Under 20 MB.</div>
       <input type="file" id="musicup" accept="audio/*" data-act="upload-music" style="padding-top:8px" ${DEMO ? "disabled" : ""}></div>
@@ -1297,6 +1413,10 @@ function viewSettings() {
     <div class="row" style="display:block"><label class="t" for="voice">Voice notes</label>
       <textarea class="field" id="voice" data-act="voice" style="margin-top:8px">${h(set.voice)}</textarea></div>
     <div class="row"><div class="txt"><div class="t">Remove @mentions</div><div class="s">So the same people aren't tagged again</div></div>${sw("mentions", set.strip_mentions, "mentions")}</div>
+    <div class="row"><div class="txt"><div class="t">Drop generic hashtags</div><div class="s">Removes tags like #viral, #fun and #videos, which say nothing about the reel. Instagram reads captions to decide who might like it, so specific words help more.</div></div>${sw("generic", set.drop_generic_tags, "generic")}</div>
+  </div>
+  <div class="sec">COLLABS</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Invite the original's collaborators</div><div class="s">When a reel was a collab, its trial reels invite the same people as collaborators. They get an invite to accept each time. If Instagram won't take collaborators on a trial reel, they're credited in the caption instead.</div></div>${sw("invitec", set.invite_collaborators, "invitec")}</div>
   </div>
   <div class="sec">VIDEO LINK</div><div class="list">
     <div class="row"><div class="txt"><div class="t">Backup link if the main one fails</div><div class="s">Instagram downloads each video from a temporary link. If the free Cloudflare link fails, use litterbox.catbox.moe, a free host that deletes the file after an hour.</div></div>${sw("backup", set.backup_host, "backup")}</div>
@@ -1309,6 +1429,8 @@ function viewSettings() {
     <div class="row" style="display:block"><div class="t">Instagram</div>
       <div class="s">${ig.connected ? `Connected${s.account.username ? " as @" + h(s.account.username) : ""}. The token renews itself every week${ig.days_left != null ? `, ${ig.days_left} days left` : ""}.` : "Not connected. Paste the access token from your Meta app."}</div>
       ${ed.ig || !ig.connected ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="igtok" type="password" placeholder="Paste your Instagram access token" autocomplete="off"><button class="btn primary" data-act="save-ig">Save</button></div>` : `<div style="display:flex;gap:16px;padding-top:6px"><button class="btn danger" data-act="edit" data-k="ig">Replace token</button><button class="btn danger" data-act="refresh-token">Renew now</button></div>`}</div>
+    <div class="row" style="display:block"><div class="t">Facebook token</div><div class="s">${s.fb_token ? `Saved${s.fb && s.fb.username ? ", sees @" + h(s.fb.username) : ""}. Used for Instagram's music library and, if needed, your collab reels.` : "Optional. Unlocks Instagram's music library and makes sure collab reels come through. Made in your Meta app under API setup with Facebook login."}</div>
+      ${ed.fb || !s.fb_token ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="fbtok" type="password" placeholder="Paste your Facebook user token" autocomplete="off"><button class="btn primary" data-act="save-fb">Save</button></div>` : `<button class="btn danger" data-act="edit" data-k="fb" style="padding-top:6px">Replace token</button>`}</div>
     <div class="row" style="display:block"><div class="t">Claude API key</div><div class="s">${s.claude_key ? "Saved" : "Optional, for caption refreshes"}</div>
       ${ed.claude || !s.claude_key ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="clkey" type="password" placeholder="sk-ant-..." autocomplete="off"><button class="btn primary" data-act="save-claude">Save</button></div>` : `<button class="btn danger" data-act="edit" data-k="claude" style="padding-top:6px">Replace key</button>`}</div>
   </div>
@@ -1348,7 +1470,9 @@ function sheetHtml(m) {
       <div class="v">${h(num(m.views))} views</div><div class="s" style="color:var(--muted);font-size:13px">Posted ${h(fmtDate(m.timestamp))}${m.permalink ? ` · <a href="${h(m.permalink)}" target="_blank" rel="noopener">Open in Instagram</a>` : ""}</div>
       <div class="cap">${h(m.caption)}</div></div>
       <button class="iconbtn" data-act="close" aria-label="Close">${I.x}</button></div>
-    <div class="chips">${statusChip(m)}<span class="chip">${st.uses} of ${st.cap} variants made</span>${st.winner ? '<span class="chip green">Last version won</span>' : ""}</div>
+    <div class="chips">${statusChip(m)}<span class="chip">${st.uses} of ${st.cap} variants made</span>${st.winner ? '<span class="chip green">Last version won</span>' : ""}${m.collab ? `<span class="chip">Collab, owned by @${h(m.owner || "")}</span>` : ""}${m.song_swap ? '<span class="chip">Song swapped</span>' : ""}</div>
+    ${m.collaborators && m.collaborators.length ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">${set.invite_collaborators ? "Trial reels invite" : "Collaborators on the original"}: ${h(m.collaborators.map((u) => "@" + u).join(", "))}</p>` : ""}
+    ${m.song_swap ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">This reel's licensed song is taken out of its original video and a new track goes in${m.music_genres ? `, picked to be close to the original (${h(m.music_genres)})` : ""}.</p>` : ""}
     ${m.next_recipe ? `<p class="s" style="margin:6px 0 0">Next edit: <b>${h(recipeLabel(m.next_recipe))}</b></p>` : (m.analysis ? "" : `<p class="note">The edit is picked when the first version is made: the app listens to the reel and checks for text on screen.</p>`)}
     ${m.analysis && m.analysis.opening ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">Strongest line: "${h(m.analysis.opening.text)}"</p>` : ""}
     ${m.analysis && m.analysis.comment ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">Comment card: "${h(m.analysis.comment.text)}"</p>` : ""}
@@ -1358,15 +1482,15 @@ function sheetHtml(m) {
       <div class="row"><div class="txt"><div class="t">Variants of this reel</div><div class="s">${m.variants_override ? `Custom. <button class="btn danger" style="padding:0;font-size:13px" data-act="reset-variants" data-id="${h(m.id)}">Use default (${set.variants_per_post})</button>` : `Default for all reels`}</div></div>
         ${stepper("variants:" + m.id, cap, 1, 20, "Variants of this reel")}</div>
     </div>`;
-  if (m.licensed && !m.has_original) {
-    html += `<div class="confirm"><div class="t" style="font-weight:600">This reel uses music from Instagram's library</div>
-      <div class="s" style="color:var(--muted);font-size:13px">Instagram won't hand over the video file. Upload your own original (without the licensed track) to include it.</div>
+  if (m.locked) {
+    html += `<div class="confirm"><div class="t" style="font-weight:600">${m.collab ? "Instagram won't share this collab's video" : "This reel uses music from Instagram's library"}</div>
+      <div class="s" style="color:var(--muted);font-size:13px">${m.collab ? `Its song is licensed, or @${h(m.owner || "")} turned off downloads. Upload the video file to include it.` : "Instagram won't hand over the video file. Upload the original from your Instagram download (Settings, Your activity, Download your information) and the song is swapped for a new one."}</div>
       <input type="file" id="orig" accept="video/*" data-act="upload" data-id="${h(m.id)}" ${DEMO ? "disabled" : ""}></div>`;
   }
   if (prev) {
     html += `<div class="preview"><div style="font-weight:600">Next version: ${h(recipeLabel(prev.recipe || (prev.style ? [prev.style] : [])))}</div>
       ${DEMO ? `<div class="fakevid" style="${tileBg(m)}">${h(prev.hook || "")}</div>` : `<video id="pv" data-id="${h(m.id)}" data-made="${h(prev.made_at)}" controls playsinline preload="metadata"></video><div class="note" id="pvnote">Loading the video</div>`}
-      <div class="s" style="color:var(--muted);font-size:13px">${[prev.dead_air_cuts ? prev.dead_air_cuts + " pauses cut" : "", prev.speed && prev.speed !== 1 ? Math.round((prev.speed - 1) * 100) + "% faster" : "", prev.sub_style ? (SUB_LABEL[prev.sub_style] || prev.sub_style) + " subtitles" : "", prev.background ? prev.background + " background" : "", prev.music ? "music: " + prev.music : ""].filter(Boolean).map(h).join(", ")}</div>
+      <div class="s" style="color:var(--muted);font-size:13px">${[prev.dead_air_cuts ? prev.dead_air_cuts + " pauses cut" : "", prev.speed && prev.speed !== 1 ? Math.round((prev.speed - 1) * 100) + "% faster" : "", prev.sub_style ? (SUB_LABEL[prev.sub_style] || prev.sub_style) + " subtitles" : "", prev.background ? prev.background + " background" : "", prev.audio ? `Instagram adds: ${[prev.audio.title, prev.audio.artist].filter(Boolean).join(" by ")}` : (prev.music ? "music: " + prev.music : "")].filter(Boolean).map(h).join(", ")}</div>
       <label class="t" for="capedit" style="font-size:13px">Caption</label>
       <textarea class="field" id="capedit">${h(m.next_caption || prev.caption)}</textarea>
       <div><button class="btn" data-act="save-caption" data-id="${h(m.id)}">Save caption</button></div></div>`;
@@ -1376,7 +1500,7 @@ function sheetHtml(m) {
       <div class="s" style="color:var(--muted);font-size:13px">It goes to non-followers first and counts toward today's ${set.posts_per_day}.${prev ? " It uses the preview above." : ""}</div>
       <div class="btns" style="padding:0"><button class="btn" data-act="confirm-no">Cancel</button><button class="btn primary" data-act="post-now" data-id="${h(m.id)}">Post</button></div></div>`;
   } else {
-    const can = !m.excluded && (!m.licensed || m.has_original) && st.uses < st.cap;
+    const can = !m.excluded && !m.locked && st.uses < st.cap && !(m.song_swap && m.voice_with_song);
     html += `<div class="btns"><button class="btn" data-act="preview" data-id="${h(m.id)}" ${busy || !can ? "disabled" : ""}>${prev ? "New preview" : "Preview next variant"}</button>
       <button class="btn primary" data-act="confirm" ${busy || !can ? "disabled" : ""}>Post now</button></div>`;
   }
@@ -1450,6 +1574,13 @@ document.addEventListener("click", async (e) => {
       catch (err) { toast(err.message); }
       break;
     }
+    case "save-fb": {
+      const v = document.getElementById("fbtok").value.trim();
+      if (!v) { toast("Paste the token first"); break; }
+      try { toast("Saving"); await api("POST", "/api/secrets", { fb_token: v }); ST.editing.fb = false; toast("Saved. Syncing to check it, about a minute."); ST.busyAction = "Sync"; wasBusy = true; await load(true); setTimeout(poll, 4000); }
+      catch (err) { toast(err.message); }
+      break;
+    }
     case "save-claude": {
       const v = document.getElementById("clkey").value.trim();
       try { await api("POST", "/api/secrets", { anthropic_key: v }); ST.editing.claude = false; toast(v ? "Key saved" : "Key removed"); await load(false); }
@@ -1479,6 +1610,10 @@ document.addEventListener("change", async (e) => {
   if (act === "pacing") await saveSetting("vary_pacing", el.checked);
   if (act === "commenter") await saveSetting("show_commenter", el.checked);
   if (act === "guardrails") await saveSetting("guardrails", el.checked);
+  if (act === "timing") await saveSetting("timing", el.checked ? "auto" : "fixed");
+  if (act === "generic") await saveSetting("drop_generic_tags", el.checked);
+  if (act === "invitec") await saveSetting("invite_collaborators", el.checked);
+  if (act === "mstyles") await saveSetting("music_styles", el.value.split(",").map((x) => x.trim()).filter(Boolean));
   if (act === "upload-music" && el.files[0]) {
     const fd = new FormData(); fd.append("file", el.files[0]);
     toast("Uploading");
