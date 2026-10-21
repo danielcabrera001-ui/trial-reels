@@ -306,6 +306,7 @@ input[type="time"].field { width: auto }
   const BUCKET_HOURS = [7, 9, 11, 13, 15, 17, 19, 21];
   const EXPLORE_ORDER = [5, 2, 6, 1, 4, 3, 7, 0];
   const UCB_C = 0.8, STATS_LAG = 36 * HOUR;
+  const EARLY = 15 * 6e4, MIN_GAP = 75 * 6e4;
   const hmMin = (hm) => { const [h, m] = (hm || "09:00").split(":").map(Number); return h * 60 + m; };
   function bucketOf(ms, s) {
     const h = parts(ms, s.timezone || "UTC").h;
@@ -370,9 +371,11 @@ input[type="time"].field { width: auto }
     if (!s.enabled || guardBlocks(guard, s)) return false;
     const day = localDay(now, s);
     const cut = cutoff(s, now);
-    const passed = slotsForDay(day, s, posts).filter((t) => cut <= t && t <= now);
+    const passed = slotsForDay(day, s, posts).filter((t) => cut <= t && t <= now + EARLY);
     const done = postsOnDay(posts, day, s).length;
     if (done >= passed.length || done >= Number(s.posts_per_day)) return false;
+    const recent = successful(posts).map((p) => parseTs(p.created_at));
+    if (recent.length && now - Math.max(...recent) < MIN_GAP) return false;
     const failed = postsOnDay(posts, day, s, ["failed"]);
     if (failed.length >= 3) return false;
     if (failed.length && now - Math.max(...failed.map((p) => parseTs(p.created_at))) < 30 * 6e4) return false;
@@ -400,7 +403,7 @@ input[type="time"].field { width: auto }
   /* rough monthly GitHub Actions minutes at these settings (the free plan includes 2,000) */
   function minutesEstimate(s) {
     const posts = Math.max(0, Math.min(Number(s.posts_per_day), 10)) * 30;
-    return Math.round(12 * 30 + 4 * 30 * 1.5 + posts * 4.5);
+    return Math.round(24 * 30 + 4 * 30 * 1.5 + posts * 5);
   }
   /* how each kind of edit has done, from your own results */
   function editStats(media, posts) {
