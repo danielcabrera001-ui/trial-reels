@@ -80,6 +80,7 @@ svg { display: block }
 .tile .badges { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; justify-content: space-between; gap: 4px }
 .pill { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: var(--tile-shade); color: #fff; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap }
 .pill.star { color: var(--star) }
+.qcap { color: var(--fg); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; margin: 2px 0 4px }
 .pill.next { background: var(--accent); color: var(--accent-fg) }
 .tile.off::after { content: ""; position: absolute; inset: 0; background: var(--scrim) }
 .tile .officon { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1 }
@@ -786,7 +787,8 @@ input[type="time"].field { width: auto }
         return { ...m, thumb: D.thumbs[m.id] || null, locked: !m.has_url && !m.original, song_swap: m.licensed,
           status: P.status(m, u, s, now, P.isWinner(m, D.history, s, now)), next_at: next[m.id] || null,
           next_recipe: P.recipeFor(u.length, m, s), analysis: D.analysis[m.id] || null,
-          next_caption: c.next_caption && c.next_caption_use === u.length ? c.next_caption : null,
+          next_caption: c.next_caption && c.next_caption_use === u.length ? c.next_caption : ((c.captions || {})[u.length] || null),
+          planned_captions: c.captions || {},
           preview: D.previews[m.id] || null };
       });
       out.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
@@ -892,7 +894,9 @@ input[type="time"].field { width: auto }
       if (mm[2] === "/preview") return dispatch("preview", id);
       if (mm[2] === "/caption") {
         const c = { ...D.controls }, use = (P.usesBySource(D.history)[id] || []).length;
-        c[id] = { ...(c[id] || {}), next_caption: body.caption || null, next_caption_use: body.caption ? use : null };
+        const planned = { ...((c[id] || {}).captions || {}) };
+        if (body.caption) planned[use] = body.caption; else delete planned[use];
+        c[id] = { ...(c[id] || {}), next_caption: body.caption || null, next_caption_use: body.caption ? use : null, captions: planned };
         await writeJSON("data/controls.json", c, "Dashboard: caption for the next version");
         D.controls = c;
         return { ok: true };
@@ -1211,6 +1215,8 @@ function viewQueue() {
     const m = byId(q.media_id) || { id: q.media_id };
     return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(m.id)}">
       <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t qtime">${h(fmtTime(q.time))}</div>
+      ${(() => { const cap = (m.planned_captions || {})[q.use_index] || (q.use_index === (m.status || {}).uses ? m.next_caption : null);
+        return cap ? `<div class="s qcap">${h(cap)}</div>` : ""; })()}
       <div class="s">Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}${q.music ? ", with a new track" : ""}, from ${m.collab ? `a collab with @${h(m.owner || "")}` : "a reel"} with ${h(num(m.views))} views${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
   }).join("") + `</div>`;
   return html + `</section>`;
@@ -1492,6 +1498,11 @@ function sheetHtml(m) {
     html += `<div class="confirm"><div class="t" style="font-weight:600">${m.collab ? "Instagram won't share this collab's video" : "This reel uses music from Instagram's library"}</div>
       <div class="s" style="color:var(--muted);font-size:13px">${m.collab ? `Its song is licensed, or @${h(m.owner || "")} turned off downloads. Upload the video file to include it.` : "Instagram won't hand over the video file. Upload the original from your Instagram download (Settings, Your activity, Download your information) and the song is swapped for a new one."}</div>
       <input type="file" id="orig" accept="video/*" data-act="upload" data-id="${h(m.id)}" ${DEMO ? "disabled" : ""}></div>`;
+  }
+  if (!prev && !m.locked && !m.excluded && st.uses < st.cap) {
+    html += `<div class="preview"><label class="t" for="capedit" style="font-weight:600">Caption for the next version</label>
+      <textarea class="field" id="capedit" placeholder="Empty uses the original caption, cleaned up">${h(m.next_caption || "")}</textarea>
+      <div><button class="btn" data-act="save-caption" data-id="${h(m.id)}">Save caption</button></div></div>`;
   }
   if (prev) {
     html += `<div class="preview"><div style="font-weight:600">Next version: ${h(recipeLabel(prev.recipe || (prev.style ? [prev.style] : [])))}</div>
