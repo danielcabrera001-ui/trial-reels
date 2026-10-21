@@ -779,7 +779,7 @@ input[type="time"].field { width: auto }
                last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
                repo: cfg.repo, minutes: P.minutesEstimate(s),
                guard: g ? { paused: !!g.paused, blocks: blocked, reasons: g.reasons || [], since: g.since, checked_at: g.checked_at } : null,
-               music: D.music };
+               meta_block: D.status.meta_block || null, music: D.music };
     }
     if (path === "/api/media" && method === "GET") {
       const list = media(), uses = P.usesBySource(D.history);
@@ -1139,6 +1139,10 @@ function renderNav() {
 }
 
 function guardBanner() {
+  const b = ST.state && ST.state.meta_block;
+  if (b) return `<div class="panel" style="border-color:var(--warn)"><div class="txt"><div class="t" style="color:var(--warn)">Instagram is blocking this app</div>
+    <div class="s">Since ${h(fmtTime(b.since))}, Meta answers "API access blocked" to everything the app asks, so nothing can post. Look for an alert or a required action on the Atabey Studio app at developers.facebook.com, an email from Meta, and Instagram &gt; Settings &gt; Account status. The app checks again every 3 hours and clears this by itself once access is back.</div></div>
+    <a class="btn" href="https://developers.facebook.com/apps/1046234695106005/dashboard/" target="_blank" rel="noopener">Open Meta app</a></div>`;
   const g = ST.state && ST.state.guard;
   if (!g || !g.blocks) return "";
   return `<div class="panel" style="border-color:var(--warn)"><div class="txt"><div class="t" style="color:var(--warn)">Paused by a safety check</div>
@@ -1147,6 +1151,7 @@ function guardBanner() {
 }
 function scheduleLine() {
   const s = ST.state, set = s.settings;
+  if (s.meta_block) return "Stopped: Instagram is blocking the app, see below.";
   if (s.guard && s.guard.blocks) return "Paused by a safety check, see below.";
   if (!s.instagram.connected) return "Connect Instagram in Settings to start";
   if (!set.enabled) return "Paused. Nothing will post until you turn this on.";
