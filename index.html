@@ -240,7 +240,7 @@ input[type="time"].field { width: auto }
     const base = { uses: n, cap, eligible: false, reason: "", ready_at: null, winner };
     if (m.is_variant) return { ...base, reason: m.trial_by === "buzzfy" ? "Trial reel made by Buzzfy" : "Trial reel made by this app" };
     if (m.available === 0 || m.available === false) return { ...base, reason: "No longer on your profile" };
-    if (m.excluded) return { ...base, reason: "Omitted" };
+    if (m.excluded) return { ...base, reason: m.auto_excluded ? "Omitted: it promotes an event that's over" : "Omitted" };
     if (!hasSource(m)) return { ...base, reason: m.collab ? "Instagram won't share this collab's video (licensed music or downloads off)"
       : "Uses licensed music, upload the original to include it" };
     if (m.licensed && m.voice_with_song) return { ...base, reason: "Your voice is mixed with the licensed song, so it can't be swapped" };
@@ -681,9 +681,10 @@ input[type="time"].field { width: auto }
       const c = D.controls[m.id] || {}, a = D.analysis[m.id] || {};
       const original = !!(c.original || m.has_original);
       const licensed = original && !m.has_url && !m.collab;
+      const auto = !!m.event_promo && !("excluded" in c);
       const row = { ...m, analyzed: a.analyzed || null, has_speech: a.has_speech ?? null, has_text: a.has_text ?? null,
                opening_ok: a.opening_ok ?? null, comment_ok: a.comment_ok ?? null,
-               excluded: c.excluded ? 1 : 0, priority: c.priority ?? null, variants_override: c.variants_override || null,
+               excluded: c.excluded || auto ? 1 : 0, auto_excluded: auto, priority: c.priority ?? null, variants_override: c.variants_override || null,
                original, has_original: original, licensed, voice_with_song: voice.has(m.id),
                music_genres: (ex.music_genres || {})[m.id] || null };
       if (licensed) { row.has_speech = false; row.opening_ok = false; }
@@ -717,7 +718,7 @@ input[type="time"].field { width: auto }
     try { runs = (await gh("GET", `${R()}/actions/workflows/${WORKFLOW}/runs?per_page=10`)).workflow_runs || []; } catch (e) { return null; }
     const kindOf = (r) => {
       const t = (r.display_title || "").split(" ")[0];
-      return { tick: "check", sync: "sync", preview: "preview", post: "post", "refresh-token": "refresh" }[t] || "check";
+      return { tick: "check", sync: "sync", preview: "preview", post: "post", "dry-run": "dryrun", "refresh-token": "refresh" }[t] || "check";
     };
     if (pending) {
       const found = runs.find((r) => (r.display_title || "").includes(pending.req));
@@ -1041,7 +1042,7 @@ function placeholder(m) {
 }
 function statusChip(m) {
   const st = m.status;
-  if (m.excluded) return '<span class="chip red">Omitted</span>';
+  if (m.excluded) return `<span class="chip red">${m.auto_excluded ? "Past event" : "Omitted"}</span>`;
   if (m.locked) return `<span class="chip amber">${m.collab ? "Video not shared" : "Licensed music"}</span>`;
   if (st.eligible && m.next_at) return `<span class="chip blue">Up next ${h(fmtTime(m.next_at))}</span>`;
   if (st.eligible) return '<span class="chip green">Ready</span>';
@@ -1119,7 +1120,7 @@ function renderTop() {
     <button class="iconbtn" data-act="sync" aria-label="Sync with Instagram" title="Sync with Instagram" ${job || !s.instagram.connected ? "disabled" : ""}>
       <span class="${job && job.kind === "sync" ? "spin" : ""}">${I.sync}</span></button></header>`;
   if (DEMO) html += `<div class="demo gut">Preview with sample reels. Your deployed app shows your real Instagram.</div>`;
-  if (job) html += `<div class="jobbar gut"><span class="dot"></span>${h({ sync: "Syncing with Instagram", post: "Posting a trial reel", preview: "Making a preview", check: "Running the scheduled check", refresh: "Renewing the Instagram token" }[job.kind] || "Working")}${job.detail ? ": " + h(job.detail) : ""}</div>`;
+  if (job) html += `<div class="jobbar gut"><span class="dot"></span>${h({ sync: "Syncing with Instagram", post: "Posting a trial reel", preview: "Making a preview", check: "Running the scheduled check", refresh: "Renewing the Instagram token", dryrun: "Test run, nothing gets posted" }[job.kind] || "Working")}${job.detail ? ": " + h(job.detail) : ""}</div>`;
   html += ({ profile: viewProfile, queue: viewQueue, posted: viewPosted, settings: viewSettings }[ST.view])();
   app.innerHTML = html;
 }
@@ -1482,7 +1483,7 @@ function sheetHtml(m) {
     ${m.analysis && m.analysis.opening ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">Strongest line: "${h(m.analysis.opening.text)}"</p>` : ""}
     ${m.analysis && m.analysis.comment ? `<p class="s" style="margin:6px 0 0;color:var(--muted)">Comment card: "${h(m.analysis.comment.text)}"</p>` : ""}
     <div class="list">
-      <div class="row"><div class="txt"><div class="t">Use for trial reels</div><div class="s">${m.excluded ? "Omitted, it will never be reposted" : "Included"}</div></div>${sw("inc", !m.excluded, "include", `data-id="${h(m.id)}"`)}</div>
+      <div class="row"><div class="txt"><div class="t">Use for trial reels</div><div class="s">${m.excluded ? (m.auto_excluded ? "Left out because it announces a dated event. Turn on if it still makes sense." : "Omitted, it will never be reposted") : "Included"}</div></div>${sw("inc", !m.excluded, "include", `data-id="${h(m.id)}"`)}</div>
       <div class="row"><div class="txt"><div class="t">Prioritize</div><div class="s">${m.priority != null ? `#${rankOf(m)} in your priority order, goes before reels ranked by views` : "Goes before reels ranked by views"}</div></div>${sw("pri", m.priority != null, "prioritize", `data-id="${h(m.id)}"`)}</div>
       <div class="row"><div class="txt"><div class="t">Variants of this reel</div><div class="s">${m.variants_override ? `Custom. <button class="btn danger" style="padding:0;font-size:13px" data-act="reset-variants" data-id="${h(m.id)}">Use default (${set.variants_per_post})</button>` : `Default for all reels`}</div></div>
         ${stepper("variants:" + m.id, cap, 1, 20, "Variants of this reel")}</div>
