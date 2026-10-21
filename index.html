@@ -363,10 +363,13 @@ input[type="time"].field { width: auto }
     const ack = s.guard_ack;
     return !(ack && parseTs(ack) > parseTs(guard.since));
   }
+  /* slots before you turned posting on don't count, so switching it on in the evening doesn't post a burst */
+  const cutoff = (s, now) => (!s.enabled ? now : s.enabled_at ? parseTs(s.enabled_at) : -Infinity);
   function dueNow(posts, s, now, guard = null) {
     if (!s.enabled || guardBlocks(guard, s)) return false;
     const day = localDay(now, s);
-    const passed = slotsForDay(day, s, posts).filter((t) => t <= now);
+    const cut = cutoff(s, now);
+    const passed = slotsForDay(day, s, posts).filter((t) => cut <= t && t <= now);
     const done = postsOnDay(posts, day, s).length;
     if (done >= passed.length || done >= Number(s.posts_per_day)) return false;
     const failed = postsOnDay(posts, day, s, ["failed"]);
@@ -381,7 +384,7 @@ input[type="time"].field { width: auto }
     const doneToday = postsOnDay(posts, day, s).length;
     for (let d = 0; d < 45; d++) {
       let slots = slotsForDay(addDays(day, d), s, posts);
-      if (d === 0) slots = slots.slice(doneToday);
+      if (d === 0) { const cut = cutoff(s, now); slots = slots.filter((t) => t >= cut).slice(doneToday); }
       for (const t of slots) {
         const at = Math.max(t, now);
         const c = pick(media, sim, s, at);
@@ -840,6 +843,7 @@ input[type="time"].field { width: auto }
         if (k === "hook_mode" && !["move", "repeat"].includes(v)) continue;
         next[k] = v;
       }
+      if (body.enabled === true && !D.settings.enabled) next.enabled_at = new Date().toISOString();
       await writeJSON("data/settings.json", next, "Dashboard: settings");
       D.settings = next;
       return { settings: settings() };
