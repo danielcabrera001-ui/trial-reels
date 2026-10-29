@@ -442,7 +442,13 @@ input[type="time"].field { width: auto }
       const measured = ps.filter((p) => p.variant_views != null);
       const views = measured.reduce((a, p) => a + p.variant_views, 0);
       const best = measured.reduce((a, p) => (!a || p.variant_views > a.variant_views ? p : a), null);
+      const counted = ps.filter((p) => p.new_followers != null);
+      const topF = counted.reduce((a, p) => (!a || p.new_followers > a.new_followers ? p : a), null);
       return { count: ps.length, measured: measured.length, views, median: median(measured.map((p) => p.variant_views)),
+               followers: counted.reduce((a, p) => a + p.new_followers, 0), followers_counted: counted.length,
+               followers_exact: counted.filter((p) => p.followers_exact).length,
+               per_1k: views ? (counted.reduce((a, p) => a + p.new_followers, 0) / views) * 1000 : null,
+               best_followers: topF ? { id: topF.id, source_id: topF.source_id, followers: topF.new_followers, recipe: topF.recipe } : null,
                beat: typical == null ? 0 : measured.filter((p) => p.variant_views >= typical).length,
                winners: measured.filter(isWin).length, best: best ? { id: best.id, source_id: best.source_id, views: best.variant_views, recipe: best.recipe } : null,
                shares: measured.reduce((a, p) => a + ((p.metrics && p.metrics.shares) || 0), 0),
@@ -474,10 +480,23 @@ input[type="time"].field { width: auto }
       const measured = ps.filter((p) => p.variant_views != null);
       const total = measured.reduce((a, p) => a + p.variant_views, 0);
       const best = measured.reduce((a, p) => (!a || p.variant_views > a.variant_views ? p : a), null);
+      const counted = ps.filter((p) => p.new_followers != null);
       return { id, views: m.views ?? null, versions: ps.length, total, median: median(measured.map((p) => p.variant_views)),
+               followers: counted.length ? counted.reduce((a, p) => a + p.new_followers, 0) : null,
                best: best ? { views: best.variant_views, recipe: best.recipe } : null, lift: m.views ? total / m.views : null,
                winners: measured.filter(isWin).length, last: Math.max(...ps.map((p) => parseTs(p.created_at))) };
-    }).sort((a, b) => b.total - a.total);
+    }).sort((a, b) => (b.followers || 0) - (a.followers || 0) || b.total - a.total);
+    /* new follows per day on the account, before the app's first trial reel and since */
+    const fd = Object.entries((st && st.follows) || {}).sort();
+    let followsCmp = null;
+    if (fd.length) {
+      const avg = (rows) => rows.length ? rows.reduce((a, [, v]) => a + (v.follows || 0), 0) / rows.length : null;
+      const net = (rows) => rows.length ? rows.reduce((a, [, v]) => a + (v.follows || 0) - (v.unfollows || 0), 0) / rows.length : null;
+      const before = start == null ? fd.slice(-30) : fd.filter(([d]) => dayMs(d) < start && dayMs(d) >= start - 30 * DAY);
+      const after = start == null ? [] : fd.filter(([d]) => dayMs(d) >= start);
+      followsCmp = { before: avg(before), before_net: net(before), days_before: before.length,
+                     after: avg(after), after_net: net(after), days_after: after.length };
+    }
     const failed30 = posts.filter((p) => p.status === "failed" && now - parseTs(p.created_at) < 30 * DAY).length;
     /* best posting times: day-1 views by 2-hour slot */
     const ts = timingStats(posts, s), allowed = allowedBuckets(s);
@@ -496,7 +515,8 @@ input[type="time"].field { width: auto }
     const fromCollabs = done.filter((p) => byId[p.source_id] && byId[p.source_id].collab).length;
     return { typical, start: start != null ? new Date(start).toISOString() : null, timing, music, buzzfy, from_collabs: fromCollabs,
              last30: windowStats(now - 30 * DAY), all: windowStats(-Infinity), reach, reach_cmp: reachCmp,
-             followers, followers_cmp: fol, per_reel: perReel, failed_30: failed30,
+             followers, followers_cmp: fol, per_reel: perReel, failed_30: failed30, follows_cmp: followsCmp,
+             app_follows: (st && st.app_follows) || null,
              guard: (st && st.guard) || null };
   }
   const api = { results, EDIT_TYPES, parseTs, usesBySource, capFor, hasSource, recipesFor, recipeFor, isWinner, status, order, pick,
@@ -1261,6 +1281,7 @@ function lineChart(points, markerDay, label, fromZero = true) {
 function metricsLine(p) {
   const m = p.metrics || {};
   const bits = [];
+  if (p.new_followers != null) bits.push(`<b style="color:var(--fg)">${p.followers_exact ? "" : "~"}${h(num(p.followers_exact ? p.new_followers : Math.round(p.new_followers * 10) / 10))}</b> new followers`);
   if (p.variant_views != null) bits.push(`<b style="color:var(--fg)">${h(num(p.variant_views))}</b> views`);
   if (m.reach != null) bits.push(`${h(num(m.reach))} reached`);
   if (m.likes != null) bits.push(`${h(num(m.likes))} likes`);
@@ -1275,16 +1296,28 @@ function metricsLine(p) {
 function verdictText(r, w) {
   const parts = [];
   if (!w.count) return "No trial reels in this period yet.";
-  parts.push(`${w.count} trial reel${w.count === 1 ? "" : "s"} brought in ${num(w.views)} views`);
+  parts.push(`${w.count} trial reel${w.count === 1 ? "" : "s"} brought in ${w.followers_counted ? `about ${num(Math.round(w.followers))} new follower${Math.round(w.followers) === 1 ? "" : "s"} and ` : ""}${num(w.views)} views`);
   if (r.typical != null && w.measured) parts.push(`${w.beat} beat your typical reel (${num(r.typical)} views)`);
   let txt = parts.join(", and ") + ".";
   if (r.reach_cmp && r.reach_cmp.change != null) txt += ` Reach to non-followers is ${r.reach_cmp.change >= 0 ? "up" : "down"} ${Math.abs(Math.round(r.reach_cmp.change * 100))}% compared with the 30 days before you started.`;
   if (r.followers_cmp && r.followers_cmp.gained) txt += ` You've ${r.followers_cmp.gained >= 0 ? "gained" : "lost"} ${num(Math.abs(r.followers_cmp.gained))} followers since then.`;
   return txt;
 }
+function followersNote(r, w) {
+  if (!w.followers_counted) return "New followers per trial reel show up here a day or two after each one posts, once Instagram's account numbers come in.";
+  if (w.followers_exact === w.followers_counted) return "Counted by Instagram for each trial reel.";
+  return "Estimated. Instagram doesn't say which reel someone followed from, so each day's new followers are shared out by reach: if trial reels reached 40% of the non-followers you reached that day, they get 40% of that day's new followers. \"New followers a day\" below is the check on it.";
+}
 function signalsHtml(r, w) {
   const rows = [];
   const sig = (dir, title, detail) => rows.push(`<div class="signal"><i class="${dir}" aria-hidden="true">${dir === "up" ? "&#9650;" : dir === "down" ? "&#9660;" : "&#8226;"}</i><div class="txt"><div class="t">${h(title)}</div><div class="s">${h(detail)}</div></div></div>`);
+  const fc = r.follows_cmp;
+  if (fc && fc.after != null && fc.days_after >= 3 && fc.before != null) {
+    const ch = fc.before ? (fc.after - fc.before) / fc.before : null;
+    sig(ch != null && ch > 0.1 ? "up" : ch != null && ch < -0.1 ? "down" : "flat", `New followers a day: ${fc.after.toFixed(1)} since, ${fc.before.toFixed(1)} before`,
+      `From Instagram's account numbers: ${fc.days_before} days before the first trial reel, ${fc.days_after} days since. Net of unfollows: ${fc.before_net.toFixed(1)} before, ${fc.after_net.toFixed(1)} since.`);
+  } else if (fc && fc.before != null) sig("flat", `Before the app: ${fc.before.toFixed(1)} new followers a day`,
+    `From Instagram's account numbers over ${fc.days_before} days. The comparison shows up 3 days after the first trial reel.`);
   if (r.reach_cmp) {
     const c = r.reach_cmp.change;
     sig(c > 0.1 ? "up" : c < -0.1 ? "down" : "flat", `Non-follower reach ${pct(c)}`, `${num(r.reach_cmp.before)} a day in the 30 days before, ${num(r.reach_cmp.after)} a day since (${r.reach_cmp.days_after} days).`);
@@ -1320,11 +1353,12 @@ function viewPosted() {
       <div class="seg" role="group" aria-label="Period"><button data-act="range" data-r="30" aria-pressed="${ST.range !== "all"}">30 days</button><button data-act="range" data-r="all" aria-pressed="${ST.range === "all"}">All time</button></div></div>
     <p class="verdict">${h(verdictText(r, w))}</p>
     <div class="stats4">
+      <div class="stat"><b>${w.followers_counted ? (w.followers_exact === w.followers_counted ? "" : "~") + h(num(Math.round(w.followers))) : "--"}</b><span>new followers from trial reels</span></div>
+      <div class="stat"><b>${w.per_1k != null && w.followers_counted ? h(w.per_1k.toFixed(1)) : "--"}</b><span>new followers per 1,000 views</span></div>
       <div class="stat"><b>${h(num(w.count))}</b><span>trial reels posted</span></div>
       <div class="stat"><b>${h(num(w.views))}</b><span>views from trial reels</span></div>
-      <div class="stat"><b>${h(num(w.beat))}</b><span>beat your typical reel</span></div>
-      <div class="stat"><b>${h(num(w.winners))}</b><span>winners (10K+ or half the original)</span></div>
     </div>
+    <p class="note">${followersNote(r, w)}</p>
     <div class="list" style="padding-top:6px">${signalsHtml(r, w)}</div>`;
   if (r.reach && r.reach.length > 1) {
     html += `<div class="sec">REACH TO NON-FOLLOWERS, PER DAY</div><div class="panel" style="display:block">${lineChart(r.reach.slice(-60), r.start && r.start.slice(0, 10), "Daily reach to non-followers")}
@@ -1360,7 +1394,7 @@ function viewPosted() {
     html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
       const m = byId(x.id) || { id: x.id };
       return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(x.id)}">
-        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}${m.collab ? ` <span class="chip">Collab</span>` : ""}</div>
+        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${x.followers != null ? `~${h(num(Math.round(x.followers)))} new followers, ` : ""}${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}${m.collab ? ` <span class="chip">Collab</span>` : ""}</div>
         <div class="s">Original: ${h(num(x.views))}${x.best ? `. Best version: ${h(num(x.best.views))}, ${h(recipeLabel(x.best.recipe))}` : ""}${x.winners ? `. ${x.winners} winner${x.winners === 1 ? "" : "s"}` : ""}</div></div>
         <span class="chip ${x.lift != null && x.lift >= 0.5 ? "green" : ""}">${x.lift == null ? "--" : "+" + Math.round(x.lift * 100) + "%"}</span></button>`;
     }).join("") + `</div><p class="note">The percentage is extra views on top of the original, from all its trial reels.</p>`;
