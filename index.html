@@ -170,6 +170,8 @@ input[type="time"].field { width: auto }
 .metrics { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums }
 .chart text { font-size: 10px; fill: var(--muted) }
 .toast { position: fixed; left: 50%; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 600; z-index: 60; max-width: calc(100% - 32px) }
+.follows-in{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px;color:var(--muted)}
+.follows-in input{width:72px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
 </style>
 
 <div class="app" id="app"></div>
@@ -446,8 +448,7 @@ input[type="time"].field { width: auto }
       const topF = counted.reduce((a, p) => (!a || p.new_followers > a.new_followers ? p : a), null);
       return { count: ps.length, measured: measured.length, views, median: median(measured.map((p) => p.variant_views)),
                followers: counted.reduce((a, p) => a + p.new_followers, 0), followers_counted: counted.length,
-               followers_exact: counted.filter((p) => p.followers_exact).length,
-               per_1k: views ? (counted.reduce((a, p) => a + p.new_followers, 0) / views) * 1000 : null,
+               views_counted: counted.reduce((a, p) => a + (p.variant_views || 0), 0),
                best_followers: topF ? { id: topF.id, source_id: topF.source_id, followers: topF.new_followers, recipe: topF.recipe } : null,
                beat: typical == null ? 0 : measured.filter((p) => p.variant_views >= typical).length,
                winners: measured.filter(isWin).length, best: best ? { id: best.id, source_id: best.source_id, views: best.variant_views, recipe: best.recipe } : null,
@@ -716,8 +717,20 @@ input[type="time"].field { width: auto }
     });
   }
 
+  /* trial reels with the follow counts you entered from Instagram's reel insights */
+  function hist() {
+    const f = D.follows || {};
+    return D.history.map((p) => {
+      const e = f[p.variant_media_id];
+      if (e && e.follows != null) return { ...p, new_followers: e.follows, followers_exact: true, followers_at: e.at };
+      if (p.followers_exact) return p;
+      const { new_followers, followers_exact, ...rest } = p;
+      return rest;
+    });
+  }
+
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -725,9 +738,9 @@ input[type="time"].field { width: auto }
       gh("GET", `${R()}/actions/secrets`).catch(() => ({ secrets: [] })),
       readJSON("data/analysis.json", {}),
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
-      readJSON("data/export.json", {}),
+      readJSON("data/export.json", {}), readJSON("data/follows.json", {}),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -818,10 +831,10 @@ input[type="time"].field { width: auto }
       return { media: out };
     }
     if (path === "/api/queue") return { queue: P.simulate(media(), D.history, s, now, 14) };
-    if (path === "/api/posts") return { posts: D.history.slice().reverse().map((p) => ({ ...p, thumb: D.thumbs[p.source_id] || null })) };
+    if (path === "/api/posts") return { posts: hist().reverse().map((p) => ({ ...p, thumb: D.thumbs[p.source_id] || null })) };
     if (path === "/api/log") return { log: (D.status.log || []).slice().reverse() };
     if (path === "/api/results") {
-      const out = P.results(media(), D.history, D.status, s, now);
+      const out = P.results(media(), hist(), D.status, s, now);
       out.minutes = await minutesThisMonth();
       /* follows per week before the app started, from your Instagram download */
       const fb = (D.export || {}).follows_by_day || {};
@@ -833,6 +846,19 @@ input[type="time"].field { width: auto }
     if (path === "/api/insights") {
       const reach = Object.entries(D.status.reach || {}).sort().map(([d, v]) => ({ day: d, value: v }));
       return { edits: P.editStats(media(), D.history), reach, guard: D.status.guard || null };
+    }
+    const fm = path.match(/^\/api\/follows\/(\d+)$/);
+    if (fm && method === "POST") {
+      const f = { ...(D.follows || {}) }, n = body.follows;
+      if (n === null || n === "" || n === undefined) delete f[fm[1]];
+      else {
+        const v = Math.round(Number(n));
+        if (!Number.isFinite(v) || v < 0 || v > 1e6) throw new Error("Enter the number of follows Instagram shows, like 0 or 12.");
+        f[fm[1]] = { follows: v, at: new Date().toISOString() };
+      }
+      await writeJSON("data/follows.json", f, "Dashboard: follows from Instagram");
+      D.follows = f;
+      return { ok: true };
     }
     if (path === "/api/guard/resume" && method === "POST") {
       const next = { ...D.settings, guard_ack: new Date().toISOString() };
@@ -1278,10 +1304,16 @@ function lineChart(points, markerDay, label, fromZero = true) {
     <circle cx="${x(last)}" cy="${y(points[last].value)}" r="3.5" fill="var(--accent)"></circle>${mark}
     <text x="${L}" y="${H - 4}">${h(fmtD(points[0].day))}</text><text x="${W - R}" y="${H - 4}" text-anchor="end">${h(fmtD(points[last].day))}</text></svg>`;
 }
+function followsInput(p) {
+  if (!p.variant_media_id) return "";
+  const due = p.new_followers == null && Date.now() - new Date(p.created_at) > 3 * 864e5;
+  return `<label class="follows-in"><span>Follows from Instagram</span>
+    <input type="number" min="0" step="1" inputmode="numeric" placeholder="--" value="${p.new_followers != null ? h(String(p.new_followers)) : ""}" data-act="follows" data-id="${h(p.variant_media_id)}" aria-label="Follows Instagram shows for this trial reel">
+    ${due ? '<span class="chip amber">Add</span>' : p.new_followers != null ? '<span class="chip green">Counted</span>' : '<span class="s">after ~3 days</span>'}</label>`;
+}
 function metricsLine(p) {
   const m = p.metrics || {};
   const bits = [];
-  if (p.new_followers != null) bits.push(`<b style="color:var(--fg)">${p.followers_exact ? "" : "~"}${h(num(p.followers_exact ? p.new_followers : Math.round(p.new_followers * 10) / 10))}</b> new followers`);
   if (p.variant_views != null) bits.push(`<b style="color:var(--fg)">${h(num(p.variant_views))}</b> views`);
   if (m.reach != null) bits.push(`${h(num(m.reach))} reached`);
   if (m.likes != null) bits.push(`${h(num(m.likes))} likes`);
@@ -1296,7 +1328,7 @@ function metricsLine(p) {
 function verdictText(r, w) {
   const parts = [];
   if (!w.count) return "No trial reels in this period yet.";
-  parts.push(`${w.count} trial reel${w.count === 1 ? "" : "s"} brought in ${w.followers_counted ? `about ${num(Math.round(w.followers))} new follower${Math.round(w.followers) === 1 ? "" : "s"} and ` : ""}${num(w.views)} views`);
+  parts.push(`${w.count} trial reel${w.count === 1 ? "" : "s"} brought in ${num(w.views)} views${w.followers_counted ? ` and ${num(w.followers)} new follower${w.followers === 1 ? "" : "s"} (from the ${w.followers_counted} with a count so far)` : ""}`);
   if (r.typical != null && w.measured) parts.push(`${w.beat} beat your typical reel (${num(r.typical)} views)`);
   let txt = parts.join(", and ") + ".";
   if (r.reach_cmp && r.reach_cmp.change != null) txt += ` Reach to non-followers is ${r.reach_cmp.change >= 0 ? "up" : "down"} ${Math.abs(Math.round(r.reach_cmp.change * 100))}% compared with the 30 days before you started.`;
@@ -1304,9 +1336,10 @@ function verdictText(r, w) {
   return txt;
 }
 function followersNote(r, w) {
-  if (!w.followers_counted) return "New followers per trial reel show up here a day or two after each one posts, once Instagram's account numbers come in.";
-  if (w.followers_exact === w.followers_counted) return "Counted by Instagram for each trial reel.";
-  return "Estimated. Instagram doesn't say which reel someone followed from, so each day's new followers are shared out by reach: if trial reels reached 40% of the non-followers you reached that day, they get 40% of that day's new followers. \"New followers a day\" below is the check on it.";
+  const waiting = (ST.posts || []).filter((p) => p.status === "posted" && p.new_followers == null && Date.now() - new Date(p.created_at) > 3 * 864e5).length;
+  const how = "Instagram shows follows for each reel in the app (open the trial reel, tap View insights) but won't give them to apps, so add them under All trial reels below.";
+  if (!w.followers_counted) return how + " Numbers settle about 3 days after posting.";
+  return `From ${w.followers_counted} of ${w.count} trial reels, as Instagram counts them.${waiting ? ` ${waiting} more ${waiting === 1 ? "is" : "are"} 3+ days old and waiting for a number.` : ""}`;
 }
 function signalsHtml(r, w) {
   const rows = [];
@@ -1353,8 +1386,8 @@ function viewPosted() {
       <div class="seg" role="group" aria-label="Period"><button data-act="range" data-r="30" aria-pressed="${ST.range !== "all"}">30 days</button><button data-act="range" data-r="all" aria-pressed="${ST.range === "all"}">All time</button></div></div>
     <p class="verdict">${h(verdictText(r, w))}</p>
     <div class="stats4">
-      <div class="stat"><b>${w.followers_counted ? (w.followers_exact === w.followers_counted ? "" : "~") + h(num(Math.round(w.followers))) : "--"}</b><span>new followers from trial reels</span></div>
-      <div class="stat"><b>${w.per_1k != null && w.followers_counted ? h(w.per_1k.toFixed(1)) : "--"}</b><span>new followers per 1,000 views</span></div>
+      <div class="stat"><b>${w.followers_counted ? h(num(w.followers)) : "--"}</b><span>new followers from trial reels</span></div>
+      <div class="stat"><b>${w.followers_counted && w.views_counted ? h(((w.followers / w.views_counted) * 1000).toFixed(1)) : "--"}</b><span>new followers per 1,000 views</span></div>
       <div class="stat"><b>${h(num(w.count))}</b><span>trial reels posted</span></div>
       <div class="stat"><b>${h(num(w.views))}</b><span>views from trial reels</span></div>
     </div>
@@ -1394,7 +1427,7 @@ function viewPosted() {
     html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
       const m = byId(x.id) || { id: x.id };
       return `<button class="row" style="border-left:0;border-right:0;border-top:0;background:none;text-align:left;width:100%" data-act="open" data-id="${h(x.id)}">
-        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${x.followers != null ? `~${h(num(Math.round(x.followers)))} new followers, ` : ""}${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}${m.collab ? ` <span class="chip">Collab</span>` : ""}</div>
+        <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t">${x.followers != null ? `${h(num(x.followers))} new follower${x.followers === 1 ? "" : "s"}, ` : ""}${h(num(x.total))} views from ${x.versions} version${x.versions === 1 ? "" : "s"}${m.collab ? ` <span class="chip">Collab</span>` : ""}</div>
         <div class="s">Original: ${h(num(x.views))}${x.best ? `. Best version: ${h(num(x.best.views))}, ${h(recipeLabel(x.best.recipe))}` : ""}${x.winners ? `. ${x.winners} winner${x.winners === 1 ? "" : "s"}` : ""}</div></div>
         <span class="chip ${x.lift != null && x.lift >= 0.5 ? "green" : ""}">${x.lift == null ? "--" : "+" + Math.round(x.lift * 100) + "%"}</span></button>`;
     }).join("") + `</div><p class="note">The percentage is extra views on top of the original, from all its trial reels.</p>`;
@@ -1413,7 +1446,7 @@ function viewPosted() {
     return `<div class="row"><div class="thumb" style="${tileBg(m)}"></div><div class="txt">
       <div class="t">${h(recipeLabel(p.recipe || (p.style ? [p.style] : [])) || "Trial reel")}</div>
       <div class="s">${h(fmtTime(p.created_at))}, version ${(p.use_index ?? 0) + 1}${p.sub_style ? ", " + h(SUB_LABEL[p.sub_style] || p.sub_style) + " subtitles" : ""}${p.audio ? ", music: " + h([p.audio.title, p.audio.artist].filter(Boolean).join(" by ")) : ""}${p.collaborators && p.collaborators.length ? ", with " + h(p.collaborators.map((u) => "@" + u).join(" ")) : ""}${p.trigger === "manual" ? ", posted by you" : ""}${p.variant_permalink ? ` · <a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
-      ${p.status === "posted" ? metricsLine(p) : ""}
+      ${p.status === "posted" ? metricsLine(p) + followsInput(p) : ""}
       ${p.status === "failed" ? `<div class="s" style="color:var(--danger)">${h(p.error || "")}</div>` : ""}</div>${chip}</div>`;
   }).join("") + `</div></section>`;
   return html;
@@ -1681,6 +1714,10 @@ document.addEventListener("change", async (e) => {
   if (act === "time" && el.value) await saveSetting(el.dataset.key, el.value);
   if (act === "tz") await saveSetting("timezone", el.value);
   if (act === "voice") await saveSetting("voice", el.value);
+  if (act === "follows") {
+    try { await api("POST", `/api/follows/${id}`, { follows: el.value === "" ? null : el.value }); toast(el.value === "" ? "Cleared" : "Saved"); await load(true); }
+    catch (err) { toast(err.message); }
+  }
   if (act === "upload" && el.files[0]) {
     const fd = new FormData(); fd.append("file", el.files[0]);
     toast("Uploading");
