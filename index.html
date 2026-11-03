@@ -185,7 +185,7 @@ input[type="time"].field { width: auto }
    Works in the browser (window.TRS_PLANNER) and in Node (module.exports) for tests. */
 (function (root) {
   "use strict";
-  const EDIT_TYPES = ["opening", "subtitles", "background", "comment"];
+  const EDIT_TYPES = ["opening", "subtitles", "title", "comment", "background", "look", "zoom", "recut", "cta"];
   const WINNER_MIN_VIEWS = 10000, WINNER_SHARE = 0.5, WINNER_WINDOW_DAYS = 10;
   const HOUR = 36e5, DAY = 864e5;
 
@@ -212,19 +212,35 @@ input[type="time"].field { width: auto }
     const subs = !!m.has_speech && !m.has_text && ed.includes("subtitles");
     const opening = !!m.opening_ok && ed.includes("opening");
     const comment = !!m.comment_ok && ed.includes("comment");
-    const bg = ed.includes("background");
+    const title = !!(m.titles && m.titles.length) && ed.includes("title");
     const sr = m.skip_rate;
     const slow = sr == null || sr >= 50;
     const openR = subs ? ["opening", "subtitles"] : ["opening"];
+    const texts = [];
+    if (opening && slow) texts.push(openR);
+    if (title) texts.push(["title"]);
+    if (subs) texts.push(["subtitles"]);
+    if (comment) texts.push(["comment"]);
+    if (opening && !slow) texts.push(openR);
+    const visuals = [];
+    for (const c of [["look"], ["zoom", "look"], ["background"], ["zoom"]]) {
+      const v = c.filter((k) => ed.includes(k));
+      if (v.length && !visuals.some((x) => x.join() === v.join())) visuals.push(v);
+    }
+    const recut = ed.includes("recut") && (m.duration || 0) >= 10;
+    const cta = ed.includes("cta");
+    if (!texts.length && !visuals.length) return [["subtle"].concat(cta ? ["cta"] : [])];
+    const nt = Math.max(1, texts.length), nv = Math.max(1, visuals.length);
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    const n = (nt * nv) / gcd(nt, nv);
     const out = [];
-    if (opening && slow) out.push(openR);
-    if (subs) out.push(["subtitles"]);
-    if (bg) out.push(["background"]);
-    if (comment) out.push(["comment"]);
-    if (bg && subs) out.push(["background", "subtitles"]);
-    if (opening && !slow) out.push(openR);
-    if (comment && bg) out.push(["background", "comment"]);
-    return out.length ? out : [["subtle"]];
+    for (let k = 0; k < n; k++) {
+      const r = (texts.length ? texts[k % nt].slice() : []).concat(visuals.length ? visuals[k % nv].slice() : []);
+      if (recut && k % 2 === 0) r.push("recut");
+      if (cta) r.push("cta");
+      out.push(r);
+    }
+    return out;
   }
   function recipeFor(i, m, s) { const r = recipesFor(m, s); return r ? r[i % r.length] : null; }
 
@@ -708,7 +724,7 @@ input[type="time"].field { width: auto }
       const licensed = original && !m.has_url && !m.collab;
       const auto = !!m.event_promo && !("excluded" in c);
       const row = { ...m, analyzed: a.analyzed || null, has_speech: a.has_speech ?? null, has_text: a.has_text ?? null,
-               opening_ok: a.opening_ok ?? null, comment_ok: a.comment_ok ?? null,
+               opening_ok: a.opening_ok ?? null, comment_ok: a.comment_ok ?? null, duration: a.duration ?? null,
                excluded: c.excluded || auto ? 1 : 0, auto_excluded: auto, priority: c.priority ?? null, variants_override: c.variants_override || null,
                original, has_original: original, licensed, voice_with_song: voice.has(m.id),
                music_genres: (ex.music_genres || {})[m.id] || null };
@@ -1030,9 +1046,11 @@ input[type="time"].field { width: auto }
 const DEMO = !!window.TRS_DEMO;
 const TRS_PLANNER_SAFE = () => window.TRS_PLANNER || { minutesEstimate: (st) => Math.round(24 * 30 + 180 + Math.min(st.posts_per_day, 10) * 30 * 3.5) };
 const EDIT_LABEL = { opening: "New opening", subtitles: "Subtitles", background: "New background", comment: "Comment card", subtle: "Subtle edit",
+                     title: "Title", look: "New look", zoom: "Punch-in zooms", recut: "Recut", cta: "Follow card",
                      hook: "Hook text", canvas: "Framed", smart_edit: "Subtle edit" };
 const recipeLabel = (r) => (r && r.length ? r.map((k) => EDIT_LABEL[k] || k).join(" + ") : "");
 const SUB_LABEL = { classic: "Classic", highlight: "Highlight", boxed: "Boxed", pop: "Pop", serif: "Serif" };
+const LOOK_LABEL = { warm: "warm", film: "film", mono: "black and white", fade: "faded", teal: "teal and orange", crisp: "crisp", golden: "golden", dusk: "dusk" };
 const ST = { state: null, media: [], posts: [], queue: [], log: [], view: "profile", filter: "all",
              sheet: null, confirm: false, editing: {}, toast: null, busyAction: null };
 let localTab;
@@ -1445,7 +1463,7 @@ function viewPosted() {
     const chip = p.status === "posted" ? "" : p.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip blue">Posting</span>';
     return `<div class="row"><div class="thumb" style="${tileBg(m)}"></div><div class="txt">
       <div class="t">${h(recipeLabel(p.recipe || (p.style ? [p.style] : [])) || "Trial reel")}</div>
-      <div class="s">${h(fmtTime(p.created_at))}, version ${(p.use_index ?? 0) + 1}${p.sub_style ? ", " + h(SUB_LABEL[p.sub_style] || p.sub_style) + " subtitles" : ""}${p.audio ? ", music: " + h([p.audio.title, p.audio.artist].filter(Boolean).join(" by ")) : ""}${p.collaborators && p.collaborators.length ? ", with " + h(p.collaborators.map((u) => "@" + u).join(" ")) : ""}${p.trigger === "manual" ? ", posted by you" : ""}${p.variant_permalink ? ` · <a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
+      <div class="s">${h(fmtTime(p.created_at))}, version ${(p.use_index ?? 0) + 1}${p.title ? `, title "${h(p.title)}"` : ""}${p.look ? ", " + h(LOOK_LABEL[p.look] || p.look) + " look" : ""}${p.sub_style ? ", " + h(SUB_LABEL[p.sub_style] || p.sub_style) + " subtitles" : ""}${p.audio ? ", music: " + h([p.audio.title, p.audio.artist].filter(Boolean).join(" by ")) : ""}${p.collaborators && p.collaborators.length ? ", with " + h(p.collaborators.map((u) => "@" + u).join(" ")) : ""}${p.trigger === "manual" ? ", posted by you" : ""}${p.variant_permalink ? ` · <a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>
       ${p.status === "posted" ? metricsLine(p) + followsInput(p) : ""}
       ${p.status === "failed" ? `<div class="s" style="color:var(--danger)">${h(p.error || "")}</div>` : ""}</div>${chip}</div>`;
   }).join("") + `</div></section>`;
@@ -1476,8 +1494,8 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Winners go first</div><div class="s">When a trial reel passes 10K views or half its original's, the next version of that reel jumps the queue</div></div>${sw("winners", set.winners_first, "winners")}</div>
   </div>
   <div class="sec">EDITS</div><div class="list">
-    <div class="row" style="display:block"><div class="t">Edits to use</div><div class="s">Each version of a reel gets the next edit that fits it. Subtitles only go on reels with speech and no text on screen.</div>
-      <div class="chips" style="padding-top:8px">${["opening", "subtitles", "background", "comment"].map((k) => `<button class="toggle-chip" data-act="edit-type" data-edit="${k}" aria-pressed="${(set.edits || []).includes(k)}">${EDIT_LABEL[k]}</button>`).join("")}</div></div>
+    <div class="row" style="display:block"><div class="t">Edits to use</div><div class="s">Each version gets something said on screen (a new opening, a title, subtitles or a comment) plus a visual change (a color look, punch-in zooms or a new background), paired differently every time. Every other version is also recut, and each ends on a small follow card. Subtitles only go on reels with speech and no text on screen.</div>
+      <div class="chips" style="padding-top:8px">${["opening", "title", "subtitles", "comment", "look", "zoom", "background", "recut", "cta"].map((k) => `<button class="toggle-chip" data-act="edit-type" data-edit="${k}" aria-pressed="${(set.edits || []).includes(k)}">${EDIT_LABEL[k]}</button>`).join("")}</div></div>
     <div class="row"><div class="txt"><div class="t">Move the strongest line to the front</div><div class="s">${set.hook_mode === "move" ? "It's cut from its original spot, so it isn't heard twice" : "It plays first, then the reel runs from the start"}</div></div>${sw("hookmove", set.hook_mode === "move", "hookmove")}</div>
     <div class="row"><div class="txt"><div class="t">Cut dead air</div><div class="s">Removes pauses between sentences and changes the framing at each cut, centered on your face</div></div>${sw("deadair", set.cut_dead_air, "deadair")}</div>
     <div class="row"><div class="txt"><div class="t">Vary pacing</div><div class="s">Versions alternate between normal speed and 4 or 8% faster</div></div>${sw("pacing", set.vary_pacing, "pacing")}</div>
