@@ -776,7 +776,8 @@ input[type="time"].field { width: auto }
         question: q.question || null, caption: q.caption || q.text, titles: (q.hooks || []).slice(), order: i,
         timestamp: q.added_at || null, views: null, available: 1, is_variant: 0, analyzed: true, has_speech: false, has_text: false,
         excluded: c.excluded ? 1 : 0, auto_excluded: false, priority: c.priority ?? null, variants_override: c.variants_override || null,
-        licensed: false };
+        licensed: false, qtype: q.type || "quote", credit: q.credit || null, evidence: q.evidence || null, cite: q.cite || null,
+        cited_in: q.cited_in || null };
     });
   }
 
@@ -1093,7 +1094,7 @@ input[type="time"].field { width: auto }
 const DEMO = !!window.TRS_DEMO;
 const TRS_PLANNER_SAFE = () => window.TRS_PLANNER || { minutesEstimate: (st) => Math.round(24 * 30 + 180 + Math.min(st.posts_per_day, 10) * 30 * 3.5) };
 const EDIT_LABEL = { opening: "New opening", subtitles: "Subtitles", background: "New background", comment: "Comment card", subtle: "Subtle edit",
-                     title: "Title", look: "New look", zoom: "Punch-in zooms", recut: "Recut", cta: "Follow card", quote: "Quote reel",
+                     title: "Title", look: "New look", zoom: "Punch-in zooms", recut: "Recut", cta: "Follow card", quote: "Quote or science reel",
                      hook: "Hook text", canvas: "Framed", smart_edit: "Subtle edit" };
 const recipeLabel = (r) => (r && r.length ? r.map((k) => EDIT_LABEL[k] || k).join(" + ") : "");
 const SUB_LABEL = { classic: "Classic", highlight: "Highlight", boxed: "Boxed", pop: "Pop", serif: "Serif" };
@@ -1306,8 +1307,9 @@ function viewProfile() {
     const cmark = m.collab ? `<span class="cmark" title="Collab with @${h(m.owner || "")}">${I.people.replace('width="12" height="12"', 'width="15" height="15"')}</span>` : "";
     if (m.kind === "quote") {
       const qv = ST.posts.filter((p) => p.source_id === m.id && p.variant_views != null).reduce((a, p) => a + p.variant_views, 0);
-      return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="Quote: ${h(m.text)}">
-        <span class="qt">${h(m.text)}</span><span class="badges">${left}${right}</span>
+      const sci = m.qtype === "fact" ? '<span class="pill">Science</span>' : "";
+      return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="${m.qtype === "fact" ? "Science" : "Quote"}: ${h(m.text)}">
+        <span class="qt">${h(m.text)}</span><span class="badges">${left === "<span></span>" && sci ? sci : left}${right}</span>
         ${off ? `<span class="officon">${I.eyeOffBig}</span>` : ""}
         ${m.status.uses ? `<span class="views">${I.play}${h(num(qv))}</span>` : ""}</button>`;
     }
@@ -1345,7 +1347,7 @@ function viewQueue() {
       <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t qtime">${h(fmtTime(q.time))}</div>
       ${(() => { const cap = (m.planned_captions || {})[q.use_index] || (q.use_index === (m.status || {}).uses ? m.next_caption : null);
         return cap ? `<div class="s qcap">${h(cap)}</div>` : ""; })()}
-      <div class="s">${m.kind === "quote" ? `Quote reel, hook ${q.use_index + 1} of ${q.cap}: "${h((m.titles || [])[q.use_index % Math.max(1, (m.titles || []).length)] || "")}", from ${h(m.source || "your courses")}`
+      <div class="s">${m.kind === "quote" ? `${m.qtype === "fact" ? "Science reel" : "Quote reel"}, hook ${q.use_index + 1} of ${q.cap}: "${h((m.titles || [])[q.use_index % Math.max(1, (m.titles || []).length)] || "")}", from ${h(m.source || "your courses")}`
         : `Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}${q.music ? ", with a new track" : ""}, from ${m.collab ? `a collab with @${h(m.owner || "")}` : "a reel"} with ${h(num(m.views))} views`}${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
   }).join("") + `</div>`;
   return html + `</section>`;
@@ -1559,7 +1561,7 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Show the commenter's name</div><div class="s">On comment cards. Off shows "Reply to a comment".</div></div>${sw("commenter", set.show_commenter, "commenter")}</div>
   </div>
   <div class="sec">QUOTE REELS</div><div class="list">
-    <p class="note">Lines from your courses and labs on your own images, each tried with up to 3 hooks. They count toward the trial reels per day above. They're under Quotes on your profile tab.</p>
+    <p class="note">Research facts (each with its evidence tier and study, the way your guides grade claims) and lines from your courses and labs, on your own images, each tried with up to 3 hooks. They count toward the trial reels per day above, and science goes first. They're under Quotes on your profile tab.</p>
     ${[[0, "Off", "Only reposts of your reels"], [4, "1 in 4", "One quote reel after every three reels"], [3, "1 in 3", "About one a day at 3 a day"], [2, "1 in 2", "Reels and quotes take turns"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="qevery" id="qe-${v}" data-act="qevery" value="${v}" ${Number(set.quote_every || 0) === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
     <div class="row"><div class="txt"><div class="t">Days between hooks</div><div class="s">Wait this long before the same quote goes out with its next hook (1 day if its last version won)</div></div>${stepper("quote_cooldown_days", set.quote_cooldown_days || 7, 1, 90, "Days between hooks")}</div>
   </div>
@@ -1634,7 +1636,9 @@ function quoteSheetHtml(m) {
   let html = `<div class="scrim" data-act="close-bg"><div class="sheet gut" role="dialog" aria-modal="true" aria-label="Quote reel">
     <div class="handle"></div>
     <div class="shead"><div class="thumb" style="${tileBg(m)}"></div><div class="meta">
-      <div class="v" style="font:500 18px/1.3 Georgia,serif">${h(m.text)}</div><div class="s" style="color:var(--muted);font-size:13px">From ${h(m.source || "your courses")}${m.theme ? ` · ${h(m.theme)}` : ""}</div></div>
+      <div class="v" style="font:500 18px/1.3 Georgia,serif">${h(m.text)}</div><div class="s" style="color:var(--muted);font-size:13px">${m.qtype === "fact"
+        ? `${h(m.evidence || "")}: ${h(m.cite || "")}${m.cited_in ? ` · cited in ${h(m.cited_in)}` : ""}`
+        : `From ${h(m.source || "your courses")}${m.theme ? ` · ${h(m.theme)}` : ""}`}</div></div>
       <button class="iconbtn" data-act="close" aria-label="Close">${I.x}</button></div>
     <div class="chips">${statusChip(m)}<span class="chip">${st.uses} of ${st.cap} hooks posted</span>${st.winner ? '<span class="chip green">Last version won</span>' : ""}</div>
     ${off ? `<p class="note">Quote reels are off. Turn them on in Settings, under Quote reels.</p>` : ""}
