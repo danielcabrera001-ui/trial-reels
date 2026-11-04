@@ -825,7 +825,7 @@ input[type="time"].field { width: auto }
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -834,9 +834,9 @@ input[type="time"].field { width: auto }
       readJSON("data/analysis.json", {}),
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
       readJSON("data/export.json", {}), readJSON("data/follows.json", {}), readJSON("data/quotes.json", []),
-      readJSON("data/music_styles.json", { styles: [] }),
+      readJSON("data/music_styles.json", { styles: [] }), readJSON("data/features.json", []),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean) });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [] });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -908,7 +908,11 @@ input[type="time"].field { width: auto }
                last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
                repo: cfg.repo, minutes: P.minutesEstimate(s),
                guard: g ? { paused: !!g.paused, blocks: blocked, reasons: g.reasons || [], since: g.since, checked_at: g.checked_at } : null,
-               meta_block: D.status.meta_block || null, music: D.music, music_styles: D.musicStyles || [] };
+               meta_block: D.status.meta_block || null, music: D.music, music_styles: D.musicStyles || [],
+               features: (D.features || []).filter((f) => f.status !== "cancelled").slice(-10).map((f) => {
+                 const m = (D.catalog.media || []).find((x) => x.id === f.media_id);
+                 return { ...f, reel_views: m ? m.views : null, thumb: (D.thumbs || {})[f.source_id] || null };
+               }) };
     }
     if (path === "/api/media" && method === "GET") {
       const list = media(), uses = P.usesBySource(D.history);
@@ -1002,6 +1006,12 @@ input[type="time"].field { width: auto }
       body.ids.forEach((id, i) => { c[id] = { ...(c[id] || {}), priority: i + 1 }; });
       await writeJSON("data/controls.json", c, "Dashboard: priority order");
       D.controls = c;
+      return { ok: true };
+    }
+    if (path === "/api/features/cancel" && method === "POST") {
+      const feats = (await readJSON("data/features.json", [])).map((f) => (f.id === body.id && f.status === "queued" ? { ...f, status: "cancelled" } : f));
+      await writeJSON("data/features.json", feats, "Dashboard: cancel a reel");
+      D.features = feats;
       return { ok: true };
     }
     if (path === "/api/sync") return dispatch("sync");
@@ -1539,6 +1549,13 @@ function viewPosted() {
       <div class="s">${x.count} trial reel${x.count === 1 ? "" : "s"}, ${(() => { const f = Math.exp(x.lift); return f >= 1.05 ? f.toFixed(1) + "x" : f <= 0.95 ? f.toFixed(1) + "x" : "about"; })()} the usual day-1 views for its kind</div></div>
       <div class="qtime">${h(num(x.median_views))}</div></div>`).join("") + `</div><p class="note">Median day-1 views. Quote reels and reels are compared with their own kind. The app picks the next style from these automatically.</p>`;
   }
+  const feats = (ST.state && ST.state.features) || [];
+  if (feats.length) {
+    html += `<div class="sec">THE WEEK'S BEST, AS REELS</div><div class="list">` + feats.slice().reverse().map((f) => `<div class="row"><div class="txt">
+      <div class="t">${h((f.title || "A trial reel that did well").slice(0, 70))}</div>
+      <div class="s">${f.status === "queued" ? "Goes out " + h(fmtDate(f.at)) : f.status === "posted" ? "Shared " + h(fmtDate(f.posted_at || f.at)) + (f.reel_views != null ? `, ${h(num(f.reel_views))} views as a reel` : "") : h(f.status)}. Trial: ${h(num(f.trial_views || 0))} views. ${h(f.caption_style || "")} caption, ${h(f.tag_set || "")} hashtags${(f.collaborators || []).length ? ", with @" + f.collaborators.map(h).join(", @") : ""}</div></div>
+      ${f.status === "queued" ? `<button class="mini" data-act="unfeature" data-id="${h(f.id)}" aria-label="Don't post this one">${I.x}</button>` : ""}</div>`).join("") + `</div><p class="note">Each Monday the review picks the top 5 trial reels from two weeks before and shares them as regular reels, one a day, testing captions and hashtags. Tap the x to keep one from going out.</p>`;
+  }
   if (r.per_reel.length) {
     html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
       const m = byId(x.id) || { id: x.id };
@@ -1598,6 +1615,9 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Cut dead air</div><div class="s">Removes pauses between sentences and changes the framing at each cut, centered on your face</div></div>${sw("deadair", set.cut_dead_air, "deadair")}</div>
     <div class="row"><div class="txt"><div class="t">Vary pacing</div><div class="s">Versions alternate between normal speed and 4 or 8% faster</div></div>${sw("pacing", set.vary_pacing, "pacing")}</div>
     <div class="row"><div class="txt"><div class="t">Show the commenter's name</div><div class="s">On comment cards. Off shows "Reply to a comment".</div></div>${sw("commenter", set.show_commenter, "commenter")}</div>
+  </div>
+  <div class="sec">THE WEEK'S BEST</div><div class="list">
+    <div class="row"><div class="txt"><div class="t">Share the week's best as reels</div><div class="s">Every Monday the top 5 trial reels from two weeks before go out as regular reels on your profile, one a day, each with a caption and hashtag experiment. See and cancel them under Results.</div></div>${sw("feat", set.feature_reels !== false, "feat")}</div>
   </div>
   <div class="sec">QUOTE REELS</div><div class="list">
     <p class="note">Research findings with their study, interpretations of the traditions your guides draw on (the Upanishads, Ayurveda, Chinese medicine, Thai medicine), and lines from your courses and labs, on your own images, each tried with up to 3 hooks. They count toward the trial reels per day above, and science goes first. They're under Quotes on your profile tab.</p>
@@ -1877,6 +1897,11 @@ document.addEventListener("change", async (e) => {
   if (act === "generic") await saveSetting("drop_generic_tags", el.checked);
   if (act === "invitec") await saveSetting("invite_collaborators", el.checked);
   if (act === "qfoot") await saveSetting("quote_footage", el.checked);
+  if (act === "feat") await saveSetting("feature_reels", el.checked);
+  if (act === "unfeature") {
+    await api("POST", "/api/features/cancel", { id: el.dataset.id });
+    await api("GET", "/api/state").then((d) => (ST.state = d)); render();
+  }
   if (act === "mstyles") await saveSetting("music_styles", el.value.split(",").map((x) => x.trim()).filter(Boolean));
   if (act === "mstyle") {
     const all = ST.state.music_styles || [], cur = (ST.state.settings.music_styles || []).filter((x) => all.includes(x));
