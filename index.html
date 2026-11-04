@@ -777,7 +777,7 @@ input[type="time"].field { width: auto }
         timestamp: q.added_at || null, views: null, available: 1, is_variant: 0, analyzed: true, has_speech: false, has_text: false,
         excluded: c.excluded ? 1 : 0, auto_excluded: false, priority: c.priority ?? null, variants_override: c.variants_override || null,
         licensed: false, qtype: q.type || "quote", credit: q.credit || null, evidence: q.evidence || null, cite: q.cite || null,
-        cited_in: q.cited_in || null };
+        cited_in: q.cited_in || null, eyebrow: q.eyebrow || null };
     });
   }
 
@@ -1307,7 +1307,7 @@ function viewProfile() {
     const cmark = m.collab ? `<span class="cmark" title="Collab with @${h(m.owner || "")}">${I.people.replace('width="12" height="12"', 'width="15" height="15"')}</span>` : "";
     if (m.kind === "quote") {
       const qv = ST.posts.filter((p) => p.source_id === m.id && p.variant_views != null).reduce((a, p) => a + p.variant_views, 0);
-      const sci = m.qtype === "fact" ? '<span class="pill">Science</span>' : "";
+      const sci = m.qtype === "fact" ? '<span class="pill">Science</span>' : m.qtype === "tradition" ? '<span class="pill">Tradition</span>' : "";
       return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="${m.qtype === "fact" ? "Science" : "Quote"}: ${h(m.text)}">
         <span class="qt">${h(m.text)}</span><span class="badges">${left === "<span></span>" && sci ? sci : left}${right}</span>
         ${off ? `<span class="officon">${I.eyeOffBig}</span>` : ""}
@@ -1347,7 +1347,7 @@ function viewQueue() {
       <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t qtime">${h(fmtTime(q.time))}</div>
       ${(() => { const cap = (m.planned_captions || {})[q.use_index] || (q.use_index === (m.status || {}).uses ? m.next_caption : null);
         return cap ? `<div class="s qcap">${h(cap)}</div>` : ""; })()}
-      <div class="s">${m.kind === "quote" ? `${m.qtype === "fact" ? "Science reel" : "Quote reel"}, hook ${q.use_index + 1} of ${q.cap}: "${h((m.titles || [])[q.use_index % Math.max(1, (m.titles || []).length)] || "")}", from ${h(m.source || "your courses")}`
+      <div class="s">${m.kind === "quote" ? `${m.qtype === "fact" ? "Science reel" : m.qtype === "tradition" ? "Tradition reel" : "Quote reel"}, hook ${q.use_index + 1} of ${q.cap}: "${h((m.titles || [])[q.use_index % Math.max(1, (m.titles || []).length)] || "")}", from ${h(m.source || "your courses")}`
         : `Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}${q.music ? ", with a new track" : ""}, from ${m.collab ? `a collab with @${h(m.owner || "")}` : "a reel"} with ${h(num(m.views))} views`}${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
   }).join("") + `</div>`;
   return html + `</section>`;
@@ -1561,8 +1561,9 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Show the commenter's name</div><div class="s">On comment cards. Off shows "Reply to a comment".</div></div>${sw("commenter", set.show_commenter, "commenter")}</div>
   </div>
   <div class="sec">QUOTE REELS</div><div class="list">
-    <p class="note">Research facts (each with its evidence tier and study, the way your guides grade claims) and lines from your courses and labs, on your own images, each tried with up to 3 hooks. They count toward the trial reels per day above, and science goes first. They're under Quotes on your profile tab.</p>
+    <p class="note">Research findings with their study, interpretations of the traditions your guides draw on (the Upanishads, Ayurveda, Chinese medicine, Thai medicine), and lines from your courses and labs, on your own images, each tried with up to 3 hooks. They count toward the trial reels per day above, and science goes first. They're under Quotes on your profile tab.</p>
     ${[[0, "Off", "Only reposts of your reels"], [4, "1 in 4", "One quote reel after every three reels"], [3, "1 in 3", "About one a day at 3 a day"], [2, "1 in 2", "Reels and quotes take turns"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="qevery" id="qe-${v}" data-act="qevery" value="${v}" ${Number(set.quote_every || 0) === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
+    <div class="row"><div class="txt"><div class="t">Play over your reels</div><div class="s">Every other version uses a clip from one of your reels about the body instead of the image. Its sound is dropped, and the words already in it are blurred and covered by the new ones.</div></div>${sw("qfoot", set.quote_footage !== false, "qfoot")}</div>
     <div class="row"><div class="txt"><div class="t">Days between hooks</div><div class="s">Wait this long before the same quote goes out with its next hook (1 day if its last version won)</div></div>${stepper("quote_cooldown_days", set.quote_cooldown_days || 7, 1, 90, "Days between hooks")}</div>
   </div>
   <div class="sec">BACKGROUND MUSIC</div><div class="list">
@@ -1638,6 +1639,7 @@ function quoteSheetHtml(m) {
     <div class="shead"><div class="thumb" style="${tileBg(m)}"></div><div class="meta">
       <div class="v" style="font:500 18px/1.3 Georgia,serif">${h(m.text)}</div><div class="s" style="color:var(--muted);font-size:13px">${m.qtype === "fact"
         ? `${h(m.evidence || "")}: ${h(m.cite || "")}${m.cited_in ? ` · cited in ${h(m.cited_in)}` : ""}`
+        : m.qtype === "tradition" ? `Our interpretation of ${h(m.source || "")}${m.cited_in ? ` · cited in ${h(m.cited_in)}` : ""}`
         : `From ${h(m.source || "your courses")}${m.theme ? ` · ${h(m.theme)}` : ""}`}</div></div>
       <button class="iconbtn" data-act="close" aria-label="Close">${I.x}</button></div>
     <div class="chips">${statusChip(m)}<span class="chip">${st.uses} of ${st.cap} hooks posted</span>${st.winner ? '<span class="chip green">Last version won</span>' : ""}</div>
@@ -1653,7 +1655,7 @@ function quoteSheetHtml(m) {
   if (prev) {
     html += `<div class="preview"><div style="font-weight:600">Next version: "${h(prev.title || "")}"</div>
       ${DEMO ? `<div class="fakevid" style="${tileBg(m)}">${h(prev.title || "")}</div>` : `<video id="pv" data-id="${h(m.id)}" data-made="${h(prev.made_at)}" controls playsinline preload="metadata"></video><div class="note" id="pvnote">Loading the video</div>`}
-      <div class="s" style="color:var(--muted);font-size:13px">${[prev.quote_style ? prev.quote_style + " layout" : "", prev.look ? (LOOK_LABEL[prev.look] || prev.look) + " look" : "", prev.audio ? `Instagram adds: ${[prev.audio.title, prev.audio.artist].filter(Boolean).join(" by ")}` : "calm track added when it posts"].filter(Boolean).map(h).join(", ")}</div></div>`;
+      <div class="s" style="color:var(--muted);font-size:13px">${[prev.bg_reel ? "over your reel " + (prev.bg_shortcode || "") : (prev.quote_style ? prev.quote_style + " layout" : ""), prev.look ? (LOOK_LABEL[prev.look] || prev.look) + " look" : "", prev.audio ? `Instagram adds: ${[prev.audio.title, prev.audio.artist].filter(Boolean).join(" by ")}` : "calm track added when it posts"].filter(Boolean).map(h).join(", ")}</div></div>`;
   }
   html += `<div class="preview"><label class="t" for="capedit" style="font-weight:600">Caption</label>
       <textarea class="field" id="capedit">${h(m.next_caption || (prev && prev.caption) || m.caption)}</textarea>
@@ -1835,6 +1837,7 @@ document.addEventListener("change", async (e) => {
   if (act === "timing") await saveSetting("timing", el.checked ? "auto" : "fixed");
   if (act === "generic") await saveSetting("drop_generic_tags", el.checked);
   if (act === "invitec") await saveSetting("invite_collaborators", el.checked);
+  if (act === "qfoot") await saveSetting("quote_footage", el.checked);
   if (act === "mstyles") await saveSetting("music_styles", el.value.split(",").map((x) => x.trim()).filter(Boolean));
   if (act === "upload-music" && el.files[0]) {
     const fd = new FormData(); fd.append("file", el.files[0]);
