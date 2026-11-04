@@ -76,6 +76,7 @@ svg { display: block }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px }
 .tile { position: relative; aspect-ratio: 3 / 4; max-width: 100%; border: 0; padding: 0; background: var(--soft) center/cover no-repeat; overflow: hidden; color: #fff; text-align: left }
 .tile .ph { position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; font-size: 12px; font-weight: 600; text-align: center; line-height: 1.25; text-shadow: 0 1px 2px rgba(0,0,0,.35) }
+.tile .qt { position: absolute; inset: 0; display: flex; align-items: center; padding: 12px; background: linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.55)); font: 500 12px/1.3 Georgia, "Times New Roman", serif; text-shadow: 0 1px 3px rgba(0,0,0,.6) }
 .tile .views { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 3px; align-items: center; font-size: 12px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,.6); font-variant-numeric: tabular-nums }
 .tile .badges { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; justify-content: space-between; gap: 4px }
 .pill { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px; background: var(--tile-shade); color: #fff; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap }
@@ -203,12 +204,15 @@ input[type="time"].field { width: auto }
     for (const p of successful(posts)) (out[p.source_id] = out[p.source_id] || []).push(parseTs(p.created_at));
     return out;
   }
-  const capFor = (m, s) => (m.variants_override ? Number(m.variants_override) : Number(s.variants_per_post));
-  const hasSource = (m) => !!(m.has_url || m.original || m.has_original || m.media_url || m.original_file);
+  const isQuote = (m) => m.kind === "quote";
+  const capFor = (m, s) => (m.variants_override ? Number(m.variants_override)
+    : isQuote(m) ? Math.max(1, (m.titles || []).length) : Number(s.variants_per_post));
+  const hasSource = (m) => isQuote(m) || !!(m.has_url || m.original || m.has_original || m.media_url || m.original_file);
 
   function recipesFor(m, s) {
-    if (!m.analyzed) return null;
     const ed = s.edits && s.edits.length ? s.edits : EDIT_TYPES;
+    if (isQuote(m)) return [ed.includes("cta") ? ["quote", "cta"] : ["quote"]];
+    if (!m.analyzed) return null;
     const subs = !!m.has_speech && !m.has_text && ed.includes("subtitles");
     const opening = !!m.opening_ok && ed.includes("opening");
     const comment = !!m.comment_ok && ed.includes("comment");
@@ -259,6 +263,7 @@ input[type="time"].field { width: auto }
     const base = { uses: n, cap, eligible: false, reason: "", ready_at: null, winner };
     if (m.is_variant) return { ...base, reason: m.trial_by === "buzzfy" ? "Trial reel made by Buzzfy" : "Trial reel made by this app" };
     if (m.available === 0 || m.available === false) return { ...base, reason: "No longer on your profile" };
+    if (isQuote(m)) return quoteStatus(m, uses, s, at, base);
     if (m.excluded) return { ...base, reason: m.auto_excluded ? "Omitted: it promotes a class or event" : "Omitted" };
     if (!hasSource(m)) return { ...base, reason: m.collab ? "Instagram won't share this collab's video (licensed music or downloads off)"
       : "Uses licensed music, upload the original to include it" };
@@ -273,6 +278,33 @@ input[type="time"].field { width: auto }
     }
     return { ...base, eligible: true, reason: "Ready" };
   }
+  function quoteStatus(m, uses, s, at, base) {
+    if (Number(s.quote_every || 0) <= 0) return { ...base, reason: "Quote reels are off" };
+    if (m.excluded) return { ...base, reason: "Omitted" };
+    if (base.uses >= base.cap) return { ...base, reason: `All ${base.cap} hooks posted` };
+    if (uses.length) {
+      const cool = Math.max(...uses) + (base.winner ? 1 : Number(s.quote_cooldown_days || 7)) * DAY;
+      if (at < cool) return { ...base, reason: "Cooling down", ready_at: new Date(cool).toISOString() };
+    }
+    return { ...base, eligible: true, reason: "Ready" };
+  }
+  function quotesTurn(posts, s) {
+    const every = Number(s.quote_every || 0);
+    if (every <= 0) return false;
+    let run = 0;
+    for (const p of successful(posts).slice().sort((a, b) => parseTs(b.created_at) - parseTs(a.created_at))) {
+      if (String(p.source_id).startsWith("q-")) return run >= every - 1;
+      run += 1;
+    }
+    return true;
+  }
+  function quoteOrder(quotes, posts, s, at) {
+    const uses = usesBySource(posts);
+    const key = (m) => [m.priority != null ? 0 : 1, m.priority != null ? m.priority : 0, isWinner(m, posts, s, at) ? 0 : 1,
+      (uses[m.id] || []).length, m.order || 0];
+    const keys = new Map(quotes.map((m) => [m, key(m)]));
+    return quotes.slice().sort((a, b) => { const ka = keys.get(a), kb = keys.get(b); for (let j = 0; j < 5; j++) if (ka[j] !== kb[j]) return ka[j] - kb[j]; return 0; });
+  }
   function order(media, posts, s, at) {
     const byViews = (a, b) => (b.views || 0) - (a.views || 0);
     const pri = media.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
@@ -283,9 +315,13 @@ input[type="time"].field { width: auto }
   }
   function pick(media, posts, s, at) {
     const uses = usesBySource(posts);
-    for (const m of order(media, posts, s, at)) {
-      const st = status(m, uses[m.id] || [], s, at, isWinner(m, posts, s, at));
-      if (st.eligible) return { media: m, use_index: st.uses, recipe: recipeFor(st.uses, m, s) };
+    const quotes = quoteOrder(media.filter(isQuote), posts, s, at);
+    const reels = order(media.filter((m) => !isQuote(m)), posts, s, at);
+    for (const pool of quotesTurn(posts, s) ? [quotes, reels] : [reels, quotes]) {
+      for (const m of pool) {
+        const st = status(m, uses[m.id] || [], s, at, isWinner(m, posts, s, at));
+        if (st.eligible) return { media: m, use_index: st.uses, recipe: recipeFor(st.uses, m, s) };
+      }
     }
     return null;
   }
@@ -362,7 +398,7 @@ input[type="time"].field { width: auto }
     const cmp = (a, b) => { const ka = key(a), kb = key(b); for (let j = 0; j < 3; j++) if (ka[j] !== kb[j]) return ka[j] - kb[j]; return 0; };
     return allowed.slice().sort(cmp).slice(0, n).sort((a, b) => a - b);
   }
-  const musicFor = (useIndex, s, m = null) => (m && m.licensed ? true : s.music === "instagram" && useIndex % 2 === 1);
+  const musicFor = (useIndex, s, m = null) => (m && (m.licensed || isQuote(m)) ? true : s.music === "instagram" && useIndex % 2 === 1);
   function slotsForDay(day, s, posts = null) {
     const n = Math.max(0, Math.min(Number(s.posts_per_day), 10));
     if (!n) return [];
@@ -536,7 +572,7 @@ input[type="time"].field { width: auto }
              app_follows: (st && st.app_follows) || null,
              guard: (st && st.guard) || null };
   }
-  const api = { results, EDIT_TYPES, parseTs, usesBySource, capFor, hasSource, recipesFor, recipeFor, isWinner, status, order, pick,
+  const api = { results, EDIT_TYPES, parseTs, usesBySource, capFor, hasSource, recipesFor, recipeFor, isWinner, status, order, pick, isQuote, quotesTurn, quoteOrder,
     localDay, addDays, slotsForDay, postsOnDay, guardBlocks, dueNow, simulate, minutesEstimate, editStats,
     BUCKET_HOURS, bucketOf, allowedBuckets, timingStats, bestBuckets, musicFor };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
@@ -730,6 +766,17 @@ input[type="time"].field { width: auto }
                music_genres: (ex.music_genres || {})[m.id] || null };
       if (licensed) { row.has_speech = false; row.opening_ok = false; }
       return row;
+    }).concat(quoteRows());
+  }
+  /* mirrors store.quote_rows() */
+  function quoteRows() {
+    return (D.quotes || []).map((q, i) => {
+      const id = "q-" + q.id, c = D.controls[id] || {};
+      return { id, kind: "quote", quote_id: q.id, text: q.text, source: q.source || null, image: q.image, theme: q.theme || null,
+        question: q.question || null, caption: q.caption || q.text, titles: (q.hooks || []).slice(), order: i,
+        timestamp: q.added_at || null, views: null, available: 1, is_variant: 0, analyzed: true, has_speech: false, has_text: false,
+        excluded: c.excluded ? 1 : 0, auto_excluded: false, priority: c.priority ?? null, variants_override: c.variants_override || null,
+        licensed: false };
     });
   }
 
@@ -746,7 +793,7 @@ input[type="time"].field { width: auto }
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -754,9 +801,9 @@ input[type="time"].field { width: auto }
       gh("GET", `${R()}/actions/secrets`).catch(() => ({ secrets: [] })),
       readJSON("data/analysis.json", {}),
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
-      readJSON("data/export.json", {}), readJSON("data/follows.json", {}),
+      readJSON("data/export.json", {}), readJSON("data/follows.json", {}), readJSON("data/quotes.json", []),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -836,7 +883,7 @@ input[type="time"].field { width: auto }
       for (const q of P.simulate(list, D.history, s, now, 60)) if (!next[q.media_id]) next[q.media_id] = q.time;
       const out = list.filter((m) => !m.is_variant && m.available !== 0).map((m) => {
         const u = uses[m.id] || [], c = D.controls[m.id] || {};
-        return { ...m, thumb: D.thumbs[m.id] || null, locked: !m.has_url && !m.original, song_swap: m.licensed,
+        return { ...m, thumb: D.thumbs[m.id] || null, locked: !P.isQuote(m) && !m.has_url && !m.original, song_swap: m.licensed,
           status: P.status(m, u, s, now, P.isWinner(m, D.history, s, now)), next_at: next[m.id] || null,
           next_recipe: P.recipeFor(u.length, m, s), analysis: D.analysis[m.id] || null,
           next_caption: c.next_caption && c.next_caption_use === u.length ? c.next_caption : ((c.captions || {})[u.length] || null),
@@ -898,7 +945,7 @@ input[type="time"].field { width: auto }
       return { ok: true };
     }
     if (path === "/api/settings" && method === "PUT") {
-      const RANGES = { posts_per_day: [0, 10], variants_per_post: [1, 20], cooldown_days: [1, 90], min_age_days: [0, 365] };
+      const RANGES = { posts_per_day: [0, 10], variants_per_post: [1, 20], cooldown_days: [1, 90], min_age_days: [0, 365], quote_every: [0, 10], quote_cooldown_days: [1, 90] };
       const next = { ...D.settings };
       for (const [k, v0] of Object.entries(body)) {
         if (!(k in (D.defaults || {}))) continue;
@@ -1046,7 +1093,7 @@ input[type="time"].field { width: auto }
 const DEMO = !!window.TRS_DEMO;
 const TRS_PLANNER_SAFE = () => window.TRS_PLANNER || { minutesEstimate: (st) => Math.round(24 * 30 + 180 + Math.min(st.posts_per_day, 10) * 30 * 3.5) };
 const EDIT_LABEL = { opening: "New opening", subtitles: "Subtitles", background: "New background", comment: "Comment card", subtle: "Subtle edit",
-                     title: "Title", look: "New look", zoom: "Punch-in zooms", recut: "Recut", cta: "Follow card",
+                     title: "Title", look: "New look", zoom: "Punch-in zooms", recut: "Recut", cta: "Follow card", quote: "Quote reel",
                      hook: "Hook text", canvas: "Framed", smart_edit: "Subtle edit" };
 const recipeLabel = (r) => (r && r.length ? r.map((k) => EDIT_LABEL[k] || k).join(" + ") : "");
 const SUB_LABEL = { classic: "Classic", highlight: "Highlight", boxed: "Boxed", pop: "Pop", serif: "Serif" };
@@ -1059,6 +1106,7 @@ if (localTab) ST.view = localTab;
 
 /* ---------- icons ---------- */
 const I = {
+  quote: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M4 17.5c0-4.2 1.6-7.6 5.4-10l1.2 1.6C8.3 10.8 7.5 12.4 7.4 14H10v5.5H4v-2zm9 0c0-4.2 1.6-7.6 5.4-10l1.2 1.6c-2.3 1.7-3.1 3.3-3.2 4.9H19v5.5h-6v-2z"/></svg>',
   grid: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
   queue: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   posted: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M3 8h18M8 3l3 5M14 3l3 5"/><path d="M10 12v5l4.5-2.5z" fill="currentColor"/></svg>',
@@ -1227,12 +1275,13 @@ function scheduleLine() {
 
 function viewProfile() {
   const s = ST.state, acct = s.account || {};
-  const reels = ST.media;
-  const counts = { all: reels.length, collab: reels.filter((m) => m.collab).length, priority: reels.filter((m) => m.priority != null).length, omitted: reels.filter((m) => m.excluded).length };
+  const everything = ST.media, reels = everything.filter((m) => m.kind !== "quote"), quotes = everything.filter((m) => m.kind === "quote");
+  const counts = { all: reels.length, collab: reels.filter((m) => m.collab).length, quote: quotes.length, priority: everything.filter((m) => m.priority != null).length, omitted: everything.filter((m) => m.excluded).length };
   let list = reels;
+  if (ST.filter === "quote") list = quotes;
   if (ST.filter === "collab") list = reels.filter((m) => m.collab);
-  if (ST.filter === "priority") list = reels.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
-  if (ST.filter === "omitted") list = reels.filter((m) => m.excluded);
+  if (ST.filter === "priority") list = everything.filter((m) => m.priority != null).sort((a, b) => a.priority - b.priority);
+  if (ST.filter === "omitted") list = everything.filter((m) => m.excluded);
   const firstNext = ST.queue[0] && ST.queue[0].media_id;
   const avatar = acct.avatar ? `style="background-image:url('${h(acct.avatar)}')"` : "";
   let html = `<section class="gut"><div class="prof"><div class="avatar" ${avatar} aria-hidden="true">${acct.avatar ? "" : h((acct.username || "?")[0].toUpperCase())}</div>
@@ -1241,13 +1290,13 @@ function viewProfile() {
     <div class="panel"><div class="txt"><div class="t">Trial reels</div><div class="s">${h(scheduleLine())}</div></div>
     ${s.instagram.connected ? sw("enabled-top", s.settings.enabled, "enabled", 'aria-label="Posting on or off"') : '<button class="btn primary" data-act="nav" data-view="settings">Connect</button>'}</div>${guardBanner()}</section>`;
   html += `<div class="tabs gut" role="tablist">
-    ${[["all", I.grid, "All"], ["collab", I.people.replace('width="12" height="12"', 'width="16" height="16"'), "Collabs"], ["priority", I.starO, "Priority"], ["omitted", I.eyeOff, "Omitted"]].filter(([k]) => k !== "collab" || counts.collab).map(([k, ic, l]) =>
+    ${[["all", I.grid, "All"], ["collab", I.people.replace('width="12" height="12"', 'width="16" height="16"'), "Collabs"], ["quote", I.quote, "Quotes"], ["priority", I.starO, "Priority"], ["omitted", I.eyeOff, "Omitted"]].filter(([k]) => (k !== "collab" || counts.collab) && (k !== "quote" || counts.quote)).map(([k, ic, l]) =>
       `<button class="tab" role="tab" aria-selected="${ST.filter === k}" data-act="filter" data-f="${k}">${ic.replace('width="24" height="24"', 'width="16" height="16"')}${l.toUpperCase()} ${counts[k] ? counts[k] : ""}</button>`).join("")}</div>`;
   if (!s.instagram.connected && !reels.length) {
     return html + `<div class="empty gut"><h2>Connect your Instagram</h2><p>Add your access token in Settings and your reels show up here, ranked and ready.</p></div>`;
   }
   if (!list.length) {
-    const msg = { all: "No reels yet. Tap sync to pull them in.", collab: "No collab reels found yet.", priority: "Star a reel to send it to the front of the line.", omitted: "Nothing omitted. Tap a reel and turn off Use for trial reels to keep it out." }[ST.filter];
+    const msg = { all: "No reels yet. Tap sync to pull them in.", collab: "No collab reels found yet.", quote: "No quotes yet.", priority: "Star a reel to send it to the front of the line.", omitted: "Nothing omitted. Tap a reel and turn off Use for trial reels to keep it out." }[ST.filter];
     return html + `<div class="empty gut"><p>${msg}</p></div>`;
   }
   html += `<div class="gut"><div class="grid">` + list.map((m) => {
@@ -1255,6 +1304,13 @@ function viewProfile() {
     const left = m.priority != null ? `<span class="pill star">${I.star}${h(rankOf(m))}</span>` : (m.id === firstNext ? '<span class="pill next">Next</span>' : (m.status.winner ? '<span class="pill star">Winner</span>' : "<span></span>"));
     const right = m.locked ? `<span class="pill" title="${m.collab ? "Video not shared" : "Licensed music"}">${I.music}</span>` : (m.status.uses ? `<span class="pill">${m.status.uses}/${m.status.cap}</span>` : "");
     const cmark = m.collab ? `<span class="cmark" title="Collab with @${h(m.owner || "")}">${I.people.replace('width="12" height="12"', 'width="15" height="15"')}</span>` : "";
+    if (m.kind === "quote") {
+      const qv = ST.posts.filter((p) => p.source_id === m.id && p.variant_views != null).reduce((a, p) => a + p.variant_views, 0);
+      return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="Quote: ${h(m.text)}">
+        <span class="qt">${h(m.text)}</span><span class="badges">${left}${right}</span>
+        ${off ? `<span class="officon">${I.eyeOffBig}</span>` : ""}
+        ${m.status.uses ? `<span class="views">${I.play}${h(num(qv))}</span>` : ""}</button>`;
+    }
     return `<button class="tile ${off ? "off" : ""}" style="${tileBg(m)}" data-act="open" data-id="${h(m.id)}" aria-label="Reel with ${h(num(m.views))} views">
       ${placeholder(m)}<span class="badges">${left}${right}</span>${cmark}
       ${off ? `<span class="officon">${I.eyeOffBig}</span>` : ""}
@@ -1276,7 +1332,7 @@ function viewQueue() {
   html += `<div class="sec">YOUR PRIORITY ORDER</div>`;
   if (!pri.length) html += `<p class="note">Star reels to put them first in line. Everything else goes by views.</p>`;
   else html += `<div class="list">` + pri.map((m, i) => `<div class="row"><div class="thumb" style="${tileBg(m)}"></div>
-      <div class="txt"><div class="t">#${i + 1}, ${h(num(m.views))} views</div><div class="s">${statusChipText(m)}</div></div>
+      <div class="txt"><div class="t">#${i + 1}, ${m.kind === "quote" ? "quote: " + h(m.text.slice(0, 60)) : h(num(m.views)) + " views"}</div><div class="s">${statusChipText(m)}</div></div>
       <button class="mini" data-act="move" data-id="${h(m.id)}" data-d="-1" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.up}</button>
       <button class="mini" data-act="move" data-id="${h(m.id)}" data-d="1" aria-label="Move down" ${i === pri.length - 1 ? "disabled" : ""}>${I.down}</button>
       <button class="mini" data-act="unstar" data-id="${h(m.id)}" aria-label="Remove from priority">${I.x}</button></div>`).join("") + `</div>`;
@@ -1289,7 +1345,8 @@ function viewQueue() {
       <div class="thumb" style="${tileBg(m)}"></div><div class="txt"><div class="t qtime">${h(fmtTime(q.time))}</div>
       ${(() => { const cap = (m.planned_captions || {})[q.use_index] || (q.use_index === (m.status || {}).uses ? m.next_caption : null);
         return cap ? `<div class="s qcap">${h(cap)}</div>` : ""; })()}
-      <div class="s">Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}${q.music ? ", with a new track" : ""}, from ${m.collab ? `a collab with @${h(m.owner || "")}` : "a reel"} with ${h(num(m.views))} views${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
+      <div class="s">${m.kind === "quote" ? `Quote reel, hook ${q.use_index + 1} of ${q.cap}: "${h((m.titles || [])[q.use_index % Math.max(1, (m.titles || []).length)] || "")}", from ${h(m.source || "your courses")}`
+        : `Variant ${q.use_index + 1} of ${q.cap}, ${h(recipeLabel(q.recipe) || "edit picked when it's made")}${q.music ? ", with a new track" : ""}, from ${m.collab ? `a collab with @${h(m.owner || "")}` : "a reel"} with ${h(num(m.views))} views`}${m.priority != null ? ", starred" : (m.status && m.status.winner ? ", last version won" : "")}</div></div></button>`;
   }).join("") + `</div>`;
   return html + `</section>`;
 }
@@ -1501,6 +1558,11 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Vary pacing</div><div class="s">Versions alternate between normal speed and 4 or 8% faster</div></div>${sw("pacing", set.vary_pacing, "pacing")}</div>
     <div class="row"><div class="txt"><div class="t">Show the commenter's name</div><div class="s">On comment cards. Off shows "Reply to a comment".</div></div>${sw("commenter", set.show_commenter, "commenter")}</div>
   </div>
+  <div class="sec">QUOTE REELS</div><div class="list">
+    <p class="note">Lines from your courses and labs on your own images, each tried with up to 3 hooks. They count toward the trial reels per day above. They're under Quotes on your profile tab.</p>
+    ${[[0, "Off", "Only reposts of your reels"], [4, "1 in 4", "One quote reel after every three reels"], [3, "1 in 3", "About one a day at 3 a day"], [2, "1 in 2", "Reels and quotes take turns"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="qevery" id="qe-${v}" data-act="qevery" value="${v}" ${Number(set.quote_every || 0) === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
+    <div class="row"><div class="txt"><div class="t">Days between hooks</div><div class="s">Wait this long before the same quote goes out with its next hook (1 day if its last version won)</div></div>${stepper("quote_cooldown_days", set.quote_cooldown_days || 7, 1, 90, "Days between hooks")}</div>
+  </div>
   <div class="sec">BACKGROUND MUSIC</div><div class="list">
     ${[["off", "Off", "Keep the original sound only"], ["instagram", "Instagram's music library", s.fb_token ? "Every other version gets a popular track close to the original's genre, so you can see whether music helps. Instagram licenses it." : "Needs the Facebook token under Connections. Every other version gets a popular track close to the original's genre."], ["library", "Your tracks", "Rotates through the tracks below, softly under your voice"], ["ambient", "Soft ambient pad", "A quiet generated tone bed, no licensing needed"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="music" id="mu-${v}" data-act="music" value="${v}" ${set.music === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
     ${set.music === "instagram" ? `<div class="row" style="display:block"><label class="t" for="mstyles">Styles to try</label><div class="s">Used when the original's genre isn't known. "trending" means Instagram's popular tracks right now. Separate with commas.</div>
@@ -1564,7 +1626,52 @@ function renderLayer() {
     pv.src = url; const n = document.getElementById("pvnote"); if (n) n.remove();
   }).catch((e) => { const n = document.getElementById("pvnote"); if (n) n.textContent = e.message; });
 }
+function quoteSheetHtml(m) {
+  const set = ST.state.settings, st = m.status, busy = !!ST.state.job;
+  const hist = ST.posts.filter((p) => p.source_id === m.id), prev = m.preview;
+  const usedHooks = new Set(hist.filter((p) => p.status === "posted").map((p) => p.title));
+  const off = !Number(set.quote_every || 0);
+  let html = `<div class="scrim" data-act="close-bg"><div class="sheet gut" role="dialog" aria-modal="true" aria-label="Quote reel">
+    <div class="handle"></div>
+    <div class="shead"><div class="thumb" style="${tileBg(m)}"></div><div class="meta">
+      <div class="v" style="font:500 18px/1.3 Georgia,serif">${h(m.text)}</div><div class="s" style="color:var(--muted);font-size:13px">From ${h(m.source || "your courses")}${m.theme ? ` · ${h(m.theme)}` : ""}</div></div>
+      <button class="iconbtn" data-act="close" aria-label="Close">${I.x}</button></div>
+    <div class="chips">${statusChip(m)}<span class="chip">${st.uses} of ${st.cap} hooks posted</span>${st.winner ? '<span class="chip green">Last version won</span>' : ""}</div>
+    ${off ? `<p class="note">Quote reels are off. Turn them on in Settings, under Quote reels.</p>` : ""}
+    <div class="sec">HOOKS, ONE PER VERSION</div><div class="list">` + (m.titles || []).map((t, i) => {
+      const p = hist.find((x) => x.status === "posted" && x.title === t);
+      return `<div class="row"><div class="txt"><div class="t">${h(t)}</div><div class="s">${p ? `Posted ${h(fmtDate(p.created_at))}${p.variant_views != null ? `, ${h(num(p.variant_views))} views` : ""}${p.new_followers != null ? `, ${h(num(p.new_followers))} new followers` : ""}` : (i === st.uses % Math.max(1, m.titles.length) && !usedHooks.has(t) ? "Next" : "Not posted yet")}</div></div></div>`;
+    }).join("") + `</div>
+    <div class="list">
+      <div class="row"><div class="txt"><div class="t">Use for trial reels</div><div class="s">${m.excluded ? "Omitted, it won't be posted" : "Included"}</div></div>${sw("inc", !m.excluded, "include", `data-id="${h(m.id)}"`)}</div>
+      <div class="row"><div class="txt"><div class="t">Prioritize</div><div class="s">${m.priority != null ? `#${rankOf(m)} in your priority order` : "Goes before the other quotes"}</div></div>${sw("pri", m.priority != null, "prioritize", `data-id="${h(m.id)}"`)}</div>
+    </div>`;
+  if (prev) {
+    html += `<div class="preview"><div style="font-weight:600">Next version: "${h(prev.title || "")}"</div>
+      ${DEMO ? `<div class="fakevid" style="${tileBg(m)}">${h(prev.title || "")}</div>` : `<video id="pv" data-id="${h(m.id)}" data-made="${h(prev.made_at)}" controls playsinline preload="metadata"></video><div class="note" id="pvnote">Loading the video</div>`}
+      <div class="s" style="color:var(--muted);font-size:13px">${[prev.quote_style ? prev.quote_style + " layout" : "", prev.look ? (LOOK_LABEL[prev.look] || prev.look) + " look" : "", prev.audio ? `Instagram adds: ${[prev.audio.title, prev.audio.artist].filter(Boolean).join(" by ")}` : "calm track added when it posts"].filter(Boolean).map(h).join(", ")}</div></div>`;
+  }
+  html += `<div class="preview"><label class="t" for="capedit" style="font-weight:600">Caption</label>
+      <textarea class="field" id="capedit">${h(m.next_caption || (prev && prev.caption) || m.caption)}</textarea>
+      <div><button class="btn" data-act="save-caption" data-id="${h(m.id)}">Save caption</button></div></div>`;
+  if (ST.confirm) {
+    html += `<div class="confirm"><div style="font-weight:600">Post this quote as a trial reel now?</div>
+      <div class="s" style="color:var(--muted);font-size:13px">It goes to non-followers first and counts toward today's ${set.posts_per_day}.</div>
+      <div class="btns" style="padding:0"><button class="btn" data-act="confirm-no">Cancel</button><button class="btn primary" data-act="post-now" data-id="${h(m.id)}">Post</button></div></div>`;
+  } else {
+    const can = !m.excluded && st.uses < st.cap;
+    html += `<div class="btns"><button class="btn" data-act="preview" data-id="${h(m.id)}" ${busy || !can ? "disabled" : ""}>${prev ? "New preview" : "Preview next version"}</button>
+      <button class="btn primary" data-act="confirm" ${busy || !can ? "disabled" : ""}>Post now</button></div>`;
+  }
+  if (hist.length) {
+    html += `<div class="sec">POSTED</div><div class="list">` + hist.map((p) => `<div class="row"><div class="txt"><div class="t">"${h(p.title || "")}"</div>
+      <div class="s">${h(fmtTime(p.created_at))}${p.status !== "posted" ? ", " + h(p.status) : ""}</div>${p.status === "posted" ? metricsLine(p) : ""}</div>
+      ${p.variant_permalink ? `<a href="${h(p.variant_permalink)}" target="_blank" rel="noopener">Open</a>` : ""}</div>`).join("") + `</div>`;
+  }
+  return html + `</div></div>`;
+}
 function sheetHtml(m) {
+  if (m.kind === "quote") return quoteSheetHtml(m);
   const set = ST.state.settings, st = m.status, busy = !!ST.state.job;
   const hist = ST.posts.filter((p) => p.source_id === m.id);
   const cap = m.variants_override || set.variants_per_post;
@@ -1652,6 +1759,7 @@ document.addEventListener("click", async (e) => {
       await saveSetting("edits", cur.includes(k) ? cur.filter((x) => x !== k) : cur.concat(k)); break;
     }
     case "music": await saveSetting("music", el.value); break;
+    case "qevery": await saveSetting("quote_every", Number(el.value)); break;
     case "del-music":
       try { await api("DELETE", "/api/music/" + encodeURIComponent(el.dataset.name)); toast("Removed"); await load(true); } catch (err) { toast(err.message); }
       break;
