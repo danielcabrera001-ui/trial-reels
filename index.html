@@ -477,6 +477,37 @@ input[type="time"].field { width: auto }
     return Object.entries(rows).map(([k, r]) => ({ edit: k, count: r.n, median_views: med(r.views), median_share: med(r.share) }))
       .sort((a, b) => (b.median_views || 0) - (a.median_views || 0));
   }
+  /* the music style a trial reel was posted with (tracks from before the styles were all calm, unless trending) */
+  function musicKey(p) {
+    const a = p.audio;
+    if (!a) return null;
+    if (a.style) return a.style;
+    return String(a.query || "").startsWith("trending") ? "trending" : "calm piano";
+  }
+  /* day-1 views by music style, compared with the typical trial reel of the same kind (mirrors planner.music_stats) */
+  function musicStats(posts) {
+    const rows = [];
+    for (const p of successful(posts)) {
+      const d1 = (p.checks || {}).d1;
+      if (d1 == null) continue;
+      const kind = String(p.source_id || "").startsWith("q-") ? "quote" : "reel";
+      rows.push([kind, musicKey(p) || "none", Math.log1p(Math.max(0, d1)), d1]);
+    }
+    const base = {};
+    for (const k of ["quote", "reel"]) {
+      const xs = rows.filter((r) => r[0] === k).map((r) => r[2]);
+      base[k] = xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : 0;
+    }
+    const acc = {}, order = [];
+    for (const [kind, st, x, d1] of rows) {
+      if (!acc[st]) { acc[st] = { n: 0, lift: 0, views: [] }; order.push(st); }
+      const r = acc[st];
+      r.n += 1; r.lift += x - base[kind]; r.views.push(d1);
+    }
+    const med = (a) => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); const k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k]) / 2; };
+    return order.map((st) => ({ style: st, count: acc[st].n, lift: Math.round((acc[st].lift / acc[st].n) * 1e4) / 1e4, median_views: med(acc[st].views) }))
+      .sort((a, b) => (b.lift - a.lift) || (a.style < b.style ? -1 : a.style > b.style ? 1 : 0));
+  }
   /* Everything the Results view shows: whole-app impact and per-reel performance. */
   const median = (a) => { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); const k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k]) / 2; };
   const dayMs = (d) => Date.parse(d + "T12:00:00Z");
@@ -560,8 +591,8 @@ input[type="time"].field { width: auto }
     const withM = measuredAll.filter((p) => p.audio), without = measuredAll.filter((p) => !p.audio);
     const music = { with: { n: withM.length, median: median(withM.map((p) => p.variant_views)) },
                     without: { n: without.length, median: median(without.map((p) => p.variant_views)) },
-                    tracks: withM.map((p) => ({ name: [p.audio.title, p.audio.artist].filter(Boolean).join(" by "), query: p.audio.query, views: p.variant_views }))
-                      .sort((a, b) => b.views - a.views).slice(0, 8) };
+                    tracks: withM.map((p) => ({ name: [p.audio.title, p.audio.artist].filter(Boolean).join(" by "), query: p.audio.query, style: musicKey(p), views: p.variant_views }))
+                      .sort((a, b) => b.views - a.views).slice(0, 8), styles: musicStats(posts) };
     /* Buzzfy's trial reels on the same account, as a baseline */
     const bz = media.filter((m) => m.trial_by === "buzzfy" && m.views != null);
     const buzzfy = bz.length ? { count: bz.length, median: median(bz.map((m) => m.views)), views: bz.reduce((a, m) => a + m.views, 0) } : null;
@@ -574,7 +605,7 @@ input[type="time"].field { width: auto }
   }
   const api = { results, EDIT_TYPES, parseTs, usesBySource, capFor, hasSource, recipesFor, recipeFor, isWinner, status, order, pick, isQuote, quotesTurn, quoteOrder,
     localDay, addDays, slotsForDay, postsOnDay, guardBlocks, dueNow, simulate, minutesEstimate, editStats,
-    BUCKET_HOURS, bucketOf, allowedBuckets, timingStats, bestBuckets, musicFor };
+    BUCKET_HOURS, bucketOf, allowedBuckets, timingStats, bestBuckets, musicFor, musicKey, musicStats };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.TRS_PLANNER = api;
 })(typeof window !== "undefined" ? window : globalThis);
@@ -777,7 +808,7 @@ input[type="time"].field { width: auto }
         timestamp: q.added_at || null, views: null, available: 1, is_variant: 0, analyzed: true, has_speech: false, has_text: false,
         excluded: c.excluded ? 1 : 0, auto_excluded: false, priority: c.priority ?? null, variants_override: c.variants_override || null,
         licensed: false, qtype: q.type || "quote", credit: q.credit || null, evidence: q.evidence || null, cite: q.cite || null,
-        cited_in: q.cited_in || null, eyebrow: q.eyebrow || null };
+        cited_in: q.cited_in || null, eyebrow: q.eyebrow || null, implication: q.implication || null };
     });
   }
 
@@ -794,7 +825,7 @@ input[type="time"].field { width: auto }
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -803,8 +834,9 @@ input[type="time"].field { width: auto }
       readJSON("data/analysis.json", {}),
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
       readJSON("data/export.json", {}), readJSON("data/follows.json", {}), readJSON("data/quotes.json", []),
+      readJSON("data/music_styles.json", { styles: [] }),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean) });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -876,7 +908,7 @@ input[type="time"].field { width: auto }
                last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
                repo: cfg.repo, minutes: P.minutesEstimate(s),
                guard: g ? { paused: !!g.paused, blocks: blocked, reasons: g.reasons || [], since: g.since, checked_at: g.checked_at } : null,
-               meta_block: D.status.meta_block || null, music: D.music };
+               meta_block: D.status.meta_block || null, music: D.music, music_styles: D.musicStyles || [] };
     }
     if (path === "/api/media" && method === "GET") {
       const list = media(), uses = P.usesBySource(D.history);
@@ -1497,8 +1529,15 @@ function viewPosted() {
     html += `<div class="sec">BY MUSIC</div><div class="list">
       <div class="row"><div class="txt"><div class="t">With a track from Instagram's library</div><div class="s">${r.music.with.n} trial reels</div></div><div class="qtime">${h(num(r.music.with.median))}</div></div>
       <div class="row"><div class="txt"><div class="t">Without</div><div class="s">${r.music.without.n} trial reels</div></div><div class="qtime">${h(num(r.music.without.median))}</div></div>
-      ${r.music.tracks.map((t) => `<div class="row"><div class="txt"><div class="t">${h(t.name || "Track")}</div><div class="s">${t.query && t.query !== "trending" ? "Picked for: " + h(t.query) : "Trending"}</div></div><div class="qtime">${h(num(t.views))}</div></div>`).join("")}
+      ${r.music.tracks.map((t) => `<div class="row"><div class="txt"><div class="t">${h(t.name || "Track")}</div><div class="s">${t.style ? h(t.style.charAt(0).toUpperCase() + t.style.slice(1)) : (t.query && t.query !== "trending" ? "Picked for: " + h(t.query) : "Trending")}</div></div><div class="qtime">${h(num(t.views))}</div></div>`).join("")}
     </div><p class="note">Median views per trial reel.</p>`;
+  }
+  if (r.music && r.music.styles && r.music.styles.length) {
+    const top = r.music.styles.find((x) => x.style !== "none" && x.count >= 2);
+    html += `<div class="sec">BY MUSIC STYLE</div><div class="list">` + r.music.styles.map((x) => `<div class="row"><div class="txt">
+      <div class="t">${x.style === "none" ? "No added track" : h(x.style.charAt(0).toUpperCase() + x.style.slice(1))}${top && x.style === top.style && x.lift > 0 ? ' <span class="chip green">Best so far</span>' : ""}</div>
+      <div class="s">${x.count} trial reel${x.count === 1 ? "" : "s"}, ${(() => { const f = Math.exp(x.lift); return f >= 1.05 ? f.toFixed(1) + "x" : f <= 0.95 ? f.toFixed(1) + "x" : "about"; })()} the usual day-1 views for its kind</div></div>
+      <div class="qtime">${h(num(x.median_views))}</div></div>`).join("") + `</div><p class="note">Median day-1 views. Quote reels and reels are compared with their own kind. The app picks the next style from these automatically.</p>`;
   }
   if (r.per_reel.length) {
     html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
@@ -1567,9 +1606,9 @@ function viewSettings() {
     <div class="row"><div class="txt"><div class="t">Days between hooks</div><div class="s">Wait this long before the same quote goes out with its next hook (1 day if its last version won)</div></div>${stepper("quote_cooldown_days", set.quote_cooldown_days || 7, 1, 90, "Days between hooks")}</div>
   </div>
   <div class="sec">BACKGROUND MUSIC</div><div class="list">
-    ${[["off", "Off", "Keep the original sound only"], ["instagram", "Instagram's music library", s.fb_token ? "Every other version gets a popular track close to the original's genre, so you can see whether music helps. Instagram licenses it." : "Needs the Facebook token under Connections. Every other version gets a popular track close to the original's genre."], ["library", "Your tracks", "Rotates through the tracks below, softly under your voice"], ["ambient", "Soft ambient pad", "A quiet generated tone bed, no licensing needed"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="music" id="mu-${v}" data-act="music" value="${v}" ${set.music === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
-    ${set.music === "instagram" ? `<div class="row" style="display:block"><label class="t" for="mstyles">Styles to try</label><div class="s">Used when the original's genre isn't known. "trending" means Instagram's popular tracks right now. Separate with commas.</div>
-      <input class="field" id="mstyles" data-act="mstyles" value="${h((set.music_styles || []).join(", "))}" style="margin-top:8px"></div>` : ""}
+    ${[["off", "Off", "Keep the original sound only"], ["instagram", "Instagram's music library", s.fb_token ? "Every other version of a reel, and every science, tradition and quote reel, gets a track, so you can see whether music helps and which style works. Instagram licenses it." : "Needs the Facebook token under Connections. Every other version gets a track, with music styles tested against each other."], ["library", "Your tracks", "Rotates through the tracks below, softly under your voice"], ["ambient", "Soft ambient pad", "A quiet generated tone bed, no licensing needed"]].map(([v, t, d]) => `<label class="radio"><input type="radio" name="music" id="mu-${v}" data-act="music" value="${v}" ${set.music === v ? "checked" : ""}><span><b style="font-weight:600">${t}</b><br><span class="s">${d}</span></span></label>`).join("")}
+    ${set.music === "instagram" && (s.music_styles || []).length ? `<div class="row" style="display:block"><div class="t">Music styles to test</div><div class="s">Every track comes from one of these. Each gets tried, then the app leans toward the styles whose trial reels get the most views, and keeps testing the others now and then. Only the instrumental ones go under your voice. See how each does under Results.</div>
+      <div class="chips" style="padding-top:8px">${s.music_styles.map((k) => `<button class="toggle-chip" data-act="mstyle" data-style="${h(k)}" aria-pressed="${!(set.music_styles || []).length || set.music_styles.includes(k)}">${h(k.charAt(0).toUpperCase() + k.slice(1))}</button>`).join("")}</div></div>` : ""}
     <p class="note">Reels Instagram locks for licensed music can still be used if you add the original video: the song is taken out and a new track goes in.</p>
     ${(s.music || []).map((f) => `<div class="row"><div class="txt"><div class="t">${h(f.name)}</div></div><button class="mini" data-act="del-music" data-name="${h(f.name)}" aria-label="Remove ${h(f.name)}">${I.x}</button></div>`).join("")}
     <div class="row" style="display:block"><label class="t" for="musicup">Add a track</label><div class="s">Only music you have the rights to, like royalty-free libraries. Under 20 MB.</div>
@@ -1637,7 +1676,7 @@ function quoteSheetHtml(m) {
   let html = `<div class="scrim" data-act="close-bg"><div class="sheet gut" role="dialog" aria-modal="true" aria-label="Quote reel">
     <div class="handle"></div>
     <div class="shead"><div class="thumb" style="${tileBg(m)}"></div><div class="meta">
-      <div class="v" style="font:500 18px/1.3 Georgia,serif">${h(m.text)}</div><div class="s" style="color:var(--muted);font-size:13px">${m.qtype === "fact"
+      <div class="v" style="font:500 18px/1.3 Georgia,serif">${h(m.text)}</div>${m.implication ? `<div style="font:italic 500 16px/1.35 Georgia,serif;color:var(--accent-warm,#b0502c);margin:4px 0 2px">${h(m.implication)}</div>` : ""}<div class="s" style="color:var(--muted);font-size:13px">${m.qtype === "fact"
         ? `${h(m.evidence || "")}: ${h(m.cite || "")}${m.cited_in ? ` · cited in ${h(m.cited_in)}` : ""}`
         : m.qtype === "tradition" ? `Our interpretation of ${h(m.source || "")}${m.cited_in ? ` · cited in ${h(m.cited_in)}` : ""}`
         : `From ${h(m.source || "your courses")}${m.theme ? ` · ${h(m.theme)}` : ""}`}</div></div>
@@ -1839,6 +1878,12 @@ document.addEventListener("change", async (e) => {
   if (act === "invitec") await saveSetting("invite_collaborators", el.checked);
   if (act === "qfoot") await saveSetting("quote_footage", el.checked);
   if (act === "mstyles") await saveSetting("music_styles", el.value.split(",").map((x) => x.trim()).filter(Boolean));
+  if (act === "mstyle") {
+    const all = ST.state.music_styles || [], cur = (ST.state.settings.music_styles || []).filter((x) => all.includes(x));
+    const on = cur.length ? cur : all.slice(), k = el.dataset.style;
+    const next = on.includes(k) ? on.filter((x) => x !== k) : on.concat(k);
+    if (next.length) await saveSetting("music_styles", next.length === all.length ? [] : next);
+  }
   if (act === "upload-music" && el.files[0]) {
     const fd = new FormData(); fd.append("file", el.files[0]);
     toast("Uploading");
