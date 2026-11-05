@@ -902,6 +902,7 @@ input[type="time"].field { width: auto }
       const thumbs = D.thumbs || {};
       return { account: { ...(D.catalog.account || {}), avatar: thumbs.avatar || null }, settings: s,
                instagram: { connected: !!ig, days_left: days }, claude_key: !!D.secrets.ANTHROPIC_API_KEY,
+               agentmail_key: !!D.secrets.AGENTMAIL_API_KEY, journal_site: !!(D.secrets.JOURNAL_API_URL && D.secrets.JOURNAL_API_KEY),
                fb_token: !!D.secrets.FB_ACCESS_TOKEN, fb: D.status.fb || null,
                fb_days_left: D.secrets.FB_ACCESS_TOKEN ? Math.max(0, 60 - Math.floor((now - P.parseTs(D.secrets.FB_ACCESS_TOKEN.updated_at)) / 864e5)) : null,
                today: { posted: done, planned: slots.length, next: next ? new Date(next).toISOString() : null },
@@ -1022,6 +1023,11 @@ input[type="time"].field { width: auto }
         if (body.fb_token) await setSecret("FB_ACCESS_TOKEN", body.fb_token);
         else await gh("DELETE", `${R()}/actions/secrets/FB_ACCESS_TOKEN`).catch(() => {});
         await loadAll(); await dispatch("sync");
+      }
+      for (const [k, name] of [["agentmail_key", "AGENTMAIL_API_KEY"], ["journal_url", "JOURNAL_API_URL"], ["journal_key", "JOURNAL_API_KEY"]]) {
+        if (body[k] === undefined) continue;
+        if (body[k]) await setSecret(name, body[k]);
+        else await gh("DELETE", `${R()}/actions/secrets/${name}`).catch(() => {});
       }
       if (body.anthropic_key !== undefined) {
         if (body.anthropic_key) await setSecret("ANTHROPIC_API_KEY", body.anthropic_key);
@@ -1662,6 +1668,10 @@ function viewSettings() {
       ${ed.fb || !s.fb_token ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="fbtok" type="password" placeholder="Paste your Facebook user token" autocomplete="off"><button class="btn primary" data-act="save-fb">Save</button></div>` : `<button class="btn danger" data-act="edit" data-k="fb" style="padding-top:6px">Replace token</button>`}</div>
     <div class="row" style="display:block"><div class="t">Claude API key</div><div class="s">${s.claude_key ? "Saved" : "Optional, for caption refreshes"}</div>
       ${ed.claude || !s.claude_key ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="clkey" type="password" placeholder="sk-ant-..." autocomplete="off"><button class="btn primary" data-act="save-claude">Save</button></div>` : `<button class="btn danger" data-act="edit" data-k="claude" style="padding-top:6px">Replace key</button>`}</div>
+    <div class="row" style="display:block"><div class="t">AgentMail API key</div><div class="s">${s.agentmail_key ? "Saved. The Monday review and the Journal drafts are emailed to thisisatabey@gmail.com from the studio's inbox; reply to them with edits." : "For the weekly review email and your replies. Make a free account at agentmail.to, create an API key, and paste it here."}</div>
+      ${ed.agentmail || !s.agentmail_key ? `<div style="display:flex;gap:8px;padding-top:8px"><input class="field" id="amkey" type="password" placeholder="Paste your AgentMail API key" autocomplete="off"><button class="btn primary" data-act="save-agentmail">Save</button></div>` : `<button class="btn danger" data-act="edit" data-k="agentmail" style="padding-top:6px">Replace key</button>`}</div>
+    <div class="row" style="display:block"><div class="t">Journal on somaticrecoding.com</div><div class="s">${s.journal_site ? "Connected. Approved posts go live one a day." : "After the Lovable prompt adds the Journal, paste its endpoint address and key here."}</div>
+      ${ed.journal || !s.journal_site ? `<div style="display:flex;flex-direction:column;gap:8px;padding-top:8px"><input class="field" id="jurl" type="url" placeholder="Journal endpoint address (https://...)" autocomplete="off"><div style="display:flex;gap:8px"><input class="field" id="jkey" type="password" placeholder="Journal key" autocomplete="off"><button class="btn primary" data-act="save-journal">Save</button></div></div>` : `<button class="btn danger" data-act="edit" data-k="journal" style="padding-top:6px">Replace</button>`}</div>
   </div>
   <div class="sec">ACTIVITY</div><div class="log">${ST.log.length ? ST.log.slice(0, 25).map((l) => `<div class="${l.level === "error" ? "err" : ""}">${h(fmtTime(l.ts))}: ${h(l.message)}</div>`).join("") : "Nothing yet."}</div>
   <div class="sec">FREE PLAN</div><div class="list">
@@ -1861,6 +1871,19 @@ document.addEventListener("click", async (e) => {
       const v = document.getElementById("fbtok").value.trim();
       if (!v) { toast("Paste the token first"); break; }
       try { toast("Saving"); await api("POST", "/api/secrets", { fb_token: v }); ST.editing.fb = false; toast("Saved. Syncing to check it, about a minute."); ST.busyAction = "Sync"; wasBusy = true; await load(true); setTimeout(poll, 4000); }
+      catch (err) { toast(err.message); }
+      break;
+    }
+    case "save-agentmail": {
+      const v = document.getElementById("amkey").value.trim();
+      try { await api("POST", "/api/secrets", { agentmail_key: v }); ST.editing.agentmail = false; toast(v ? "Key saved" : "Key removed"); await load(false); }
+      catch (err) { toast(err.message); }
+      break;
+    }
+    case "save-journal": {
+      const u = document.getElementById("jurl").value.trim(), k = document.getElementById("jkey").value.trim();
+      if (u && !/^https:\/\//.test(u)) { toast("The address should start with https://"); break; }
+      try { await api("POST", "/api/secrets", { journal_url: u, journal_key: k }); ST.editing.journal = false; toast(u && k ? "Journal connected" : "Journal removed"); await load(false); }
       catch (err) { toast(err.message); }
       break;
     }
