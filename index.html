@@ -1290,7 +1290,20 @@ function renderTop() {
   if (DEMO) html += `<div class="demo gut">Preview with sample reels. Your deployed app shows your real Instagram.</div>`;
   if (job) html += `<div class="jobbar gut"><span class="dot"></span>${h({ sync: "Syncing with Instagram", post: "Posting a trial reel", preview: "Making a preview", check: "Running the scheduled check", refresh: "Renewing the Instagram token", dryrun: "Test run, nothing gets posted" }[job.kind] || "Working")}${job.detail ? ": " + h(job.detail) : ""}</div>`;
   html += ({ profile: viewProfile, queue: viewQueue, posted: viewPosted, settings: viewSettings }[ST.view])();
-  app.innerHTML = html;
+  keepInputs(app, () => { app.innerHTML = html; });
+}
+/* The page redraws every few seconds while a run is going (and every 30 seconds otherwise); anything typed or pasted
+   into a field, and the cursor in it, survives the redraw. */
+function keepInputs(root, fn) {
+  const saved = {};
+  root.querySelectorAll("input[id], textarea[id]").forEach((el) => {
+    if (!["checkbox", "radio", "file"].includes(el.type) && el.value) saved[el.id] = el.value;
+  });
+  const a = document.activeElement;
+  const focus = a && a.id && root.contains(a) ? { id: a.id, s: a.selectionStart, e: a.selectionEnd } : null;
+  fn();
+  for (const [id, v] of Object.entries(saved)) { const el = document.getElementById(id); if (el && !el.value) el.value = v; }
+  if (focus) { const el = document.getElementById(focus.id); if (el) { el.focus(); try { el.setSelectionRange(focus.s, focus.e); } catch (e) { /* not a text field */ } } }
 }
 function renderNav() {
   const failed = ST.posts.some((p) => p.status === "failed" && Date.now() - new Date(p.created_at) < 864e5);
