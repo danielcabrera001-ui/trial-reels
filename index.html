@@ -825,7 +825,7 @@ input[type="time"].field { width: auto }
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats, mjp] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -834,9 +834,9 @@ input[type="time"].field { width: auto }
       readJSON("data/analysis.json", {}),
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
       readJSON("data/export.json", {}), readJSON("data/follows.json", {}), readJSON("data/quotes.json", []),
-      readJSON("data/music_styles.json", { styles: [] }), readJSON("data/features.json", []),
+      readJSON("data/music_styles.json", { styles: [] }), readJSON("data/features.json", []), readJSON("data/mj_prompts.json", []),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [] });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [], mjPrompts: Array.isArray(mjp) ? mjp : [] });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -904,6 +904,7 @@ input[type="time"].field { width: auto }
                instagram: { connected: !!ig, days_left: days }, claude_key: !!D.secrets.ANTHROPIC_API_KEY,
                agentmail_key: !!D.secrets.AGENTMAIL_API_KEY, journal_site: !!(D.secrets.JOURNAL_API_URL && D.secrets.JOURNAL_API_KEY), journal_url_set: !!D.secrets.JOURNAL_API_URL, journal_key_set: !!D.secrets.JOURNAL_API_KEY,
                fb_token: !!D.secrets.FB_ACCESS_TOKEN, fb: D.status.fb || null,
+               art_prompts: (D.mjPrompts || []).filter((m) => m.status === "open").slice(-8).map((m) => ({ ref: m.ref, date: m.date, look: m.look, for: m.for })),
                fb_days_left: D.secrets.FB_ACCESS_TOKEN ? Math.max(0, 60 - Math.floor((now - P.parseTs(D.secrets.FB_ACCESS_TOKEN.updated_at)) / 864e5)) : null,
                today: { posted: done, planned: slots.length, next: next ? new Date(next).toISOString() : null },
                last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
@@ -974,6 +975,40 @@ input[type="time"].field { width: auto }
       await writeBinary(`music/${name}`, file, "Dashboard: add music");
       await loadAll();
       return { ok: true };
+    }
+    if (path === "/api/art" && method === "POST") {
+      /* a Midjourney image: made into a JPEG (2400px at most) in the browser, saved to the art library, and when it was made
+         for one of the week's prompts, set as that line's image */
+      const file = body.get("file"), ref = body.get("ref") || "", date = body.get("date") || "";
+      if (!file || !/^image\//.test(file.type || "image/")) throw new Error("That isn't an image.");
+      if (file.size > 40 * 1024 * 1024) throw new Error("Keep images under 40 MB.");
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+      cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+      const jpg = await new Promise((res) => cv.toBlob(res, "image/jpeg", 0.9));
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const id = "a-" + stamp + "-" + (ref ? ref.toLowerCase() : Math.random().toString(36).slice(2, 7));
+      await writeBinary(`assets/quotes/${id}.jpg`, jpg, `Dashboard: add art ${id}`);
+      if (ref) {
+        const prompts = await readJSON("data/mj_prompts.json", []);
+        const m = prompts.find((x) => x.ref === ref && (!date || x.date === date));
+        if (m) {
+          m.status = "uploaded"; m.image = id; m.uploaded_at = new Date().toISOString();
+          await writeJSON("data/mj_prompts.json", prompts, `Dashboard: art for ${ref}`);
+          if (m.quote_id) {
+            const quotes = await readJSON("data/quotes.json", []);
+            const q = quotes.find((x) => x.id === m.quote_id);
+            if (q) {
+              q.image_prev = q.image; q.image = id; q.image_look = m.look || null;
+              await writeJSON("data/quotes.json", quotes, `Dashboard: new art for ${m.quote_id}`);
+            }
+          }
+        }
+      }
+      await loadAll();
+      return { ok: true, id };
     }
     const mu = path.match(/^\/api\/music\/(.+)$/);
     if (mu && method === "DELETE") {
@@ -1653,6 +1688,11 @@ function viewSettings() {
     <div class="row" style="display:block"><label class="t" for="musicup">Add a track</label><div class="s">Only music you have the rights to, like royalty-free libraries. Under 20 MB.</div>
       <input type="file" id="musicup" accept="audio/*" data-act="upload-music" style="padding-top:8px" ${DEMO ? "disabled" : ""}></div>
   </div>
+  <div class="sec">ART</div><div class="list">
+    <div class="row" style="display:block"><div class="t">Midjourney art for the reels</div><div class="s">Make the M prompts from the Monday email in Midjourney and upload your favorite for each here: it becomes that line's image, and the app moves it in 3D. Any other image you love can go in the library.</div>
+      ${(s.art_prompts || []).map((m) => `<div style="padding-top:12px"><label class="s" for="art-${h(m.ref)}" style="display:block;color:var(--ink)"><b>${h(m.ref)}</b> ${h(m.look || "")}${m.for ? ": " + h(m.for) : ""}</label><input type="file" id="art-${h(m.ref)}" accept="image/*" data-act="upload-art" data-ref="${h(m.ref)}" data-date="${h(m.date)}" style="padding-top:6px" ${DEMO ? "disabled" : ""}></div>`).join("")}
+      <div style="padding-top:12px"><label class="s" for="art-any" style="display:block;color:var(--ink)">Add to the library</label><input type="file" id="art-any" accept="image/*" multiple data-act="upload-art" style="padding-top:6px" ${DEMO ? "disabled" : ""}></div></div>
+  </div>
   <div class="sec">SAFETY</div><div class="list">
     <div class="row"><div class="txt"><div class="t">Safety checks</div><div class="s">Pause posting if reach to non-followers drops by more than half, trial reels stop getting views, or Instagram sends a limit message</div></div>${sw("guardrails", set.guardrails, "guardrails")}</div>
   </div>
@@ -1952,6 +1992,18 @@ document.addEventListener("change", async (e) => {
     const fd = new FormData(); fd.append("file", el.files[0]);
     toast("Uploading");
     try { await api("POST", "/api/music", fd); toast("Track added"); await load(true); } catch (err) { toast(err.message); }
+  }
+  if (act === "upload-art" && el.files.length) {
+    toast("Uploading");
+    try {
+      for (const f of el.files) {
+        const fd = new FormData(); fd.append("file", f);
+        if (el.dataset.ref) { fd.append("ref", el.dataset.ref); fd.append("date", el.dataset.date || ""); }
+        await api("POST", "/api/art", fd);
+      }
+      toast(el.dataset.ref ? `Saved. ${el.dataset.ref}'s line uses it from its next reel` : el.files.length > 1 ? "Added to the library" : "Added to the library");
+      await load(true);
+    } catch (err) { toast(err.message); }
   }
   if (act === "time" && el.value) await saveSetting(el.dataset.key, el.value);
   if (act === "tz") await saveSetting("timezone", el.value);
