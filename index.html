@@ -139,7 +139,7 @@ input[type="time"].field { width: auto }
 
 /* bottom nav */
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--bg); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px) }
-.nav .in { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); height: 52px }
+.nav .in { max-width: 600px; margin: 0 auto; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; height: 52px }
 .nav button { border: 0; background: none; display: grid; place-items: center; color: var(--fg); position: relative }
 .nav .badge { position: absolute; top: 9px; left: calc(50% + 6px); width: 8px; height: 8px; border-radius: 50%; background: var(--danger) }
 
@@ -734,6 +734,21 @@ input[type="time"].field { width: auto }
     return text ? JSON.parse(text) : {};
   }
   const R = () => "/repos/" + cfg.repo;
+  /* the latest Monday review for the This week tab, with each trial reel's follows as entered so far, which prompts
+     already have art, and which reels going out are still queued */
+  function weekReview() {
+    const r = D.review;
+    if (!r) return null;
+    const byId = {}; for (const p of D.history || []) byId[p.id] = p;
+    const fol = D.follows || {};
+    const mj = {}; for (const m of D.mjPrompts || []) if (m.date === r.date) mj[m.ref] = m;
+    const feats = {}; for (const f of D.features || []) feats[f.id] = f;
+    return { ...r,
+      trials: (r.trials || []).map((t) => { const p = byId[t.history_id] || {}; const e = fol[p.variant_media_id] || {};
+        return { ...t, views: p.variant_views != null ? p.variant_views : t.views, variant_media_id: p.variant_media_id || null, follows: e.follows != null ? e.follows : null }; }),
+      prompts: (r.prompts || []).map((m) => ({ ...m, status: (mj[m.ref] || {}).status || "open" })),
+      features: (r.features || []).map((f) => ({ ...f, status: (feats[f.id] || {}).status || f.status || "queued" })) };
+  }
   const utf8b64 = (s) => window.TRS_B64.toB64(new TextEncoder().encode(s));
 
   async function readJSON(path, def, ref = "main") {
@@ -825,7 +840,7 @@ input[type="time"].field { width: auto }
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats, mjp] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats, mjp, rev] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -835,8 +850,9 @@ input[type="time"].field { width: auto }
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
       readJSON("data/export.json", {}), readJSON("data/follows.json", {}), readJSON("data/quotes.json", []),
       readJSON("data/music_styles.json", { styles: [] }), readJSON("data/features.json", []), readJSON("data/mj_prompts.json", []),
+      readJSON("data/review_latest.json", null),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [], mjPrompts: Array.isArray(mjp) ? mjp : [] });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [], mjPrompts: Array.isArray(mjp) ? mjp : [], review: rev && rev.date ? rev : null });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -905,6 +921,7 @@ input[type="time"].field { width: auto }
                agentmail_key: !!D.secrets.AGENTMAIL_API_KEY, journal_site: !!(D.secrets.JOURNAL_API_URL && D.secrets.JOURNAL_API_KEY), journal_url_set: !!D.secrets.JOURNAL_API_URL, journal_key_set: !!D.secrets.JOURNAL_API_KEY,
                fb_token: !!D.secrets.FB_ACCESS_TOKEN, fb: D.status.fb || null,
                art_prompts: (D.mjPrompts || []).filter((m) => m.status === "open").slice(-8).map((m) => ({ ref: m.ref, date: m.date, look: m.look, for: m.for })),
+               review: weekReview(),
                fb_days_left: D.secrets.FB_ACCESS_TOKEN ? Math.max(0, 60 - Math.floor((now - P.parseTs(D.secrets.FB_ACCESS_TOKEN.updated_at)) / 864e5)) : null,
                today: { posted: done, planned: slots.length, next: next ? new Date(next).toISOString() : null },
                last_sync: D.catalog.last_sync, job, last_error: job ? null : lastError(), hard_max: 10,
@@ -1187,9 +1204,11 @@ const ST = { state: null, media: [], posts: [], queue: [], log: [], view: "profi
 let localTab;
 try { localTab = localStorage.getItem("trs-view"); } catch (e) { localTab = null; }
 if (localTab) ST.view = localTab;
+try { const q = new URLSearchParams(location.search).get("tab"); if (q && ["week", "profile", "queue", "posted", "settings"].includes(q)) ST.view = q; } catch (e) {}
 
 /* ---------- icons ---------- */
 const I = {
+  week: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2.5v3M16 2.5v3M3 9h18M8 14l2.5 2.5L16 12"/></svg>',
   quote: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M4 17.5c0-4.2 1.6-7.6 5.4-10l1.2 1.6C8.3 10.8 7.5 12.4 7.4 14H10v5.5H4v-2zm9 0c0-4.2 1.6-7.6 5.4-10l1.2 1.6c-2.3 1.7-3.1 3.3-3.2 4.9H19v5.5h-6v-2z"/></svg>',
   grid: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>',
   queue: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
@@ -1215,6 +1234,9 @@ const h = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "
 const nf = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const num = (n) => (n == null ? "--" : nf.format(n));
 const tz = () => (ST.state && ST.state.settings.timezone) || undefined;
+function fmtDay(d) {
+  try { return new Date(d + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }); } catch (e) { return d; }
+}
 function fmtTime(iso, withDay = true) {
   if (!iso) return "";
   const d = new Date(iso), now = new Date();
@@ -1318,13 +1340,13 @@ function renderTop() {
   if (!s) { app.innerHTML = '<div class="empty">Loading</div>'; return; }
   const acct = s.account || {};
   const job = s.job;
-  const titles = { profile: acct.username || "Trial Reels Studio", queue: "Up next", posted: "Results", settings: "Settings" };
+  const titles = { week: "This week", profile: acct.username || "Trial Reels Studio", queue: "Up next", posted: "Results", settings: "Settings" };
   let html = `<header class="top gut"><h1>${h(titles[ST.view])}</h1>
     <button class="iconbtn" data-act="sync" aria-label="Sync with Instagram" title="Sync with Instagram" ${job || !s.instagram.connected ? "disabled" : ""}>
       <span class="${job && job.kind === "sync" ? "spin" : ""}">${I.sync}</span></button></header>`;
   if (DEMO) html += `<div class="demo gut">Preview with sample reels. Your deployed app shows your real Instagram.</div>`;
   if (job) html += `<div class="jobbar gut"><span class="dot"></span>${h({ sync: "Syncing with Instagram", post: "Posting a trial reel", preview: "Making a preview", check: "Running the scheduled check", refresh: "Renewing the Instagram token", dryrun: "Test run, nothing gets posted" }[job.kind] || "Working")}${job.detail ? ": " + h(job.detail) : ""}</div>`;
-  html += ({ profile: viewProfile, queue: viewQueue, posted: viewPosted, settings: viewSettings }[ST.view])();
+  html += ({ week: viewWeek, profile: viewProfile, queue: viewQueue, posted: viewPosted, settings: viewSettings }[ST.view] || viewProfile)();
   keepInputs(app, () => { app.innerHTML = html; });
 }
 /* The page redraws every few seconds while a run is going (and every 30 seconds otherwise); anything typed or pasted
@@ -1342,7 +1364,7 @@ function keepInputs(root, fn) {
 }
 function renderNav() {
   const failed = ST.posts.some((p) => p.status === "failed" && Date.now() - new Date(p.created_at) < 864e5);
-  const items = [["profile", I.grid, "Reels"], ["queue", I.queue, "Up next"], ["posted", I.posted, "Results"], ["settings", I.gear, "Settings"]];
+  const items = [["week", I.week, "This week"], ["profile", I.grid, "Reels"], ["queue", I.queue, "Up next"], ["posted", I.posted, "Results"], ["settings", I.gear, "Settings"]];
   document.getElementById("nav").innerHTML = items.map(([v, icon, label]) =>
     `<button data-act="nav" data-view="${v}" aria-label="${label}" aria-current="${ST.view === v ? "page" : "false"}" style="${ST.view === v ? "" : "opacity:.55"}">${icon}${v === "posted" && failed ? '<span class="badge"></span>' : ""}</button>`).join("");
 }
@@ -1639,6 +1661,56 @@ function viewPosted() {
   return html;
 }
 
+/* ---------- this week: the Monday review, to act on from the phone ---------- */
+const CLAUDE_PROJECT = "https://claude.ai/project/01a15980-6a1c-730c-9ba7-4096420c1c78";
+function wkRef(r) { return `<span style="display:inline-block;min-width:28px;font-weight:700;color:var(--accent,#9E4024)">${h(r)}</span>`; }
+function wkCopy(text, label) { return `<button class="btn" data-act="copy" data-text="${h(text)}" style="margin-top:8px">${label || "Copy"}</button>`; }
+function viewWeek() {
+  const r = ST.state.review;
+  if (!r) return `<section class="gut" style="padding-block:24px"><div class="panel"><div class="txt"><div class="t">The first review arrives Monday morning</div><div class="s">Each Monday the review lands here and in your email: the videos to film, scripted and directed, your diary questions, every trial reel with a box for its follows, the Midjourney prompts with upload buttons, and the collab DMs ready to copy.</div></div></div></section>`;
+  const sec = (t, body) => body ? `<div class="sec">${h(t)}</div>${body}` : "";
+  let out = `<section class="gut" style="padding-block:8px 28px">`;
+  out += `<div style="font-size:13px;color:var(--muted);padding-top:10px">Review of ${h(fmtDay(r.date))}</div>`;
+  out += (r.summary || []).map((l) => `<p style="margin:8px 0;font-size:17px;line-height:1.45">${h(l)}</p>`).join("");
+  if (r.learning) out += `<div class="panel" style="display:block"><b>This week's learning.</b> ${h(r.learning)}</div>`;
+  out += `<a class="btn primary" href="${CLAUDE_PROJECT}" target="_blank" rel="noopener" style="width:100%;margin:6px 0 2px">Talk it through with Claude</a>
+    <p class="note">Open the chat, tap the mic and talk as long as you like, using the numbers: "T3 felt clinical, swap the hammock for the beach in V2, follows T1 12, D1: René said..." It acts on it right away and tells you what changed.</p>`;
+  out += sec("YOUR ACTIONS", (r.todo || []).length ? `<div class="list">${r.todo.map((t) => `<div class="row"><div class="txt"><div class="t" style="font-weight:400">&#9744;&nbsp; ${h(t)}</div></div></div>`).join("")}</div>` : "");
+  out += sec("FILM THIS WEEK", (r.film || []).map((v) => {
+    const beats = (v.beats || []).map((b, i) => { b = typeof b === "string" ? { say: b } : b;
+      return `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${i + 1}.</b>${b.seconds ? ` <span class="s">(${h(b.seconds)}s)</span>` : ""}
+        ${b.shot ? `<div class="s">SEE: ${h(b.shot)}</div>` : ""}${b.say ? `<div style="font-family:Georgia,serif;font-size:16px">&ldquo;${h(b.say)}&rdquo;</div>` : ""}${b.text ? `<div class="s">ON SCREEN: ${h(b.text)}</div>` : ""}</div>`; }).join("");
+    const d = v.direction || {};
+    const dir = [["location", "Where"], ["light", "Light"], ["camera", "Camera"], ["wardrobe", "Wardrobe"], ["sound", "Sound"], ["performance", "How to say it"], ["edit", "Edit"]]
+      .filter(([k]) => d[k]).map(([k, l]) => `<div class="s"><b style="color:var(--fg)">${l}:</b> ${h(d[k])}</div>`).join("");
+    const script = [v.hook, ...(v.beats || []).map((b) => (typeof b === "string" ? b : b.say)).filter(Boolean), v.ending].filter(Boolean).join("\n");
+    return `<details class="panel" style="display:block"><summary style="cursor:pointer">${wkRef(v.ref)}<b>${h(v.title || v.hook)}</b><div class="s" style="margin-left:28px">${h([v.series, v.length, v.language === "es" ? "in Spanish" : ""].filter(Boolean).join(" · "))}</div></summary>
+      ${v.why ? `<p class="s"><i>Why this one:</i> ${h(v.why)}</p>` : ""}${v.hook ? `<p><b>Open on:</b> &ldquo;${h(v.hook)}&rdquo;</p>` : ""}${beats}
+      ${v.ending ? `<p><b>End on:</b> &ldquo;${h(v.ending)}&rdquo;</p>` : ""}${dir ? `<div style="padding-top:6px">${dir}</div>` : ""}
+      ${(v.broll || []).length ? `<p class="s"><b style="color:var(--fg)">B-roll:</b> ${h(v.broll.join("; "))}</p>` : ""}
+      ${v.caption ? `<p class="s"><b style="color:var(--fg)">Caption:</b> ${h(v.caption)}</p>${wkCopy(v.caption, "Copy caption")}` : ""} ${wkCopy(script, "Copy script")}</details>`;
+  }).join(""));
+  out += sec("YOUR DIARY", (r.diary || []).length ? `<div class="list">${r.diary.map((q) => `<div class="row"><div class="txt"><div class="t" style="font-weight:400">${wkRef(q.ref)}${h(q.question)}</div></div></div>`).join("")}</div>
+    <p class="note">Answer any in the Claude chat ("D2: ..."), rough is perfect. Next week's videos are written from them.</p>` : "");
+  out += sec("THIS WEEK'S TRIAL REELS", (r.trials || []).length ? `<div class="list">${r.trials.map((t) => `<div class="row"><div class="txt"><div class="t">${wkRef(t.ref)}${t.link ? `<a href="${h(t.link)}" target="_blank" rel="noopener">${h(t.title)}</a>` : h(t.title)}</div>
+      <div class="s" style="margin-left:28px">${h(t.kind || "")}${t.views != null ? ` · ${Number(t.views).toLocaleString()} views` : ""}</div></div>
+      ${t.variant_media_id ? `<input type="number" min="0" step="1" inputmode="numeric" placeholder="follows" value="${t.follows != null ? h(String(t.follows)) : ""}" data-act="follows" data-id="${h(t.variant_media_id)}" aria-label="Follows for ${h(t.ref)}" class="field" style="width:84px">` : ""}</div>`).join("")}</div>
+    <p class="note">Follows come from each reel's insights on Instagram. They're the number that tells us what makes people stay.</p>` : "");
+  out += sec("GOING OUT TO YOUR FOLLOWERS", (r.features || []).length ? `<div class="list">${r.features.map((f) => `<div class="row"><div class="txt"><div class="t">${wkRef(f.ref)}${h(f.title || "A trial reel that did well")}</div>
+      <div class="s" style="margin-left:28px">${h(fmtTime(f.at))}${f.status !== "queued" ? " · " + h(f.status) : ""}</div><div class="s" style="margin-left:28px"><i>${h((f.caption || "").slice(0, 220))}</i></div></div>
+      ${f.status === "queued" ? `<button class="mini" data-act="unfeature" data-id="${h(f.id)}" aria-label="Don't post ${h(f.ref)}">${I.x}</button>` : ""}</div>`).join("")}</div>` : "");
+  out += sec("MIDJOURNEY PROMPTS", (r.prompts || []).map((m) => `<div class="panel" style="display:block">${wkRef(m.ref)}<b>${h(m.look || "")}</b>${m.for ? `<span class="s">: ${h(m.for)}</span>` : ""}
+      <div style="margin-top:8px;padding:10px;border-radius:8px;background:#1F1C18;color:#F3EBDD;font:13px/1.5 Menlo,Consolas,monospace;word-break:break-word">${h(m.prompt)}</div>
+      ${wkCopy(m.prompt)} ${m.status === "uploaded" ? `<span class="s">&nbsp;Art saved</span>` : `<label class="btn" style="margin-top:8px">Upload art<input type="file" accept="image/*" data-act="upload-art" data-ref="${h(m.ref)}" data-date="${h(m.date || r.date)}" style="display:none" ${DEMO ? "disabled" : ""}></label>`}</div>`).join(""));
+  out += sec("COLLAB DMS TO SEND", (r.collabs || []).map((c) => `<div class="panel" style="display:block">${wkRef(c.ref)}<a href="https://www.instagram.com/${h(c.username)}/" target="_blank" rel="noopener"><b>@${h(c.username)}</b></a>${c.followers ? `<span class="s"> · ${Number(c.followers).toLocaleString()} followers</span>` : ""}
+      ${c.why ? `<div class="s" style="margin-top:4px">${h(c.why)}</div>` : ""}<p style="margin:8px 0 0">${h(c.pitch || "")}</p>${wkCopy(c.pitch || "", "Copy DM")} <a class="btn" href="https://www.instagram.com/${h(c.username)}/" target="_blank" rel="noopener" style="margin-top:8px">Open profile</a></div>`).join(""));
+  out += sec("BLOG POSTS TO PICK", (r.blogs || []).map((b) => `<div class="panel" style="display:block">${wkRef(b.ref)}<b>${h(b.title)}</b><div class="s" style="margin-top:4px">${h(b.pitch || "")}</div>
+      ${(b.questions || []).map((q) => `<div class="s">&middot; ${h(q)}</div>`).join("")}</div>`).join("") + ((r.blogs || []).length ? `<p class="note">Pick in the Claude chat ("blog B1 B3") and answer any questions; drafts come Tuesday.</p>` : ""));
+  out += sec("CAPTIONS", (r.captions || []).map((c) => { const t = typeof c === "string" ? c : c.text || ""; return `<div class="panel" style="display:block"><p style="margin:0">${h(t)}</p>${wkCopy(t)}</div>`; }).join(""));
+  if (r.notes) out += sec("NOTES", `<p>${h(r.notes)}</p>`);
+  return out + `</section>`;
+}
+
 function viewSettings() {
   const s = ST.state, set = s.settings;
   const zones = ["America/Mexico_City", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York", "Europe/London", "Europe/Madrid"];
@@ -1866,6 +1938,13 @@ document.addEventListener("click", async (e) => {
   if (act === "close-bg") { if (e.target === el) { ST.sheet = null; ST.confirm = false; renderLayer(); } return; }
   if (el.tagName === "INPUT" && el.type !== "radio") return; // handled on change
   switch (act) {
+    case "copy": {
+      const t = el.dataset.text || "";
+      try { await navigator.clipboard.writeText(t); toast("Copied"); }
+      catch (err) { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); toast("Copied"); } catch (e2) { toast("Couldn't copy; press and hold to select"); } ta.remove(); }
+      break;
+    }
     case "nav": ST.view = el.dataset.view; ST.sheet = null; try { localStorage.setItem("trs-view", ST.view); } catch (err) {}
       if (ST.view === "settings") await api("GET", "/api/log").then((d) => (ST.log = d.log)).catch(() => {});
       window.scrollTo(0, 0); render(); break;
