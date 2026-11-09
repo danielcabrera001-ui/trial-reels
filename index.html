@@ -749,6 +749,9 @@ input[type="time"].field { width: auto }
         return { ...t, views: p.variant_views != null ? p.variant_views : t.views, variant_media_id: p.variant_media_id || null, follows: e.follows != null ? e.follows : null }; }),
       prompts: (r.prompts || []).map((m) => ({ ...m, status: (mj[m.ref] || {}).status || "open" })),
       features: (r.features || []).map((f) => ({ ...f, status: (feats[f.id] || {}).status || f.status || "proposed" })),
+      /* the papers the review mentions, with any free PDF found since it was written */
+      papers: (r.papers || []).map((p) => { const e = (p.doi && D.papers[p.doi]) || {};
+        return { ...p, title: p.title || e.title || null, pdf: p.pdf || e.pdf || null, free_url: p.free_url || e.free_url || null, url: p.url || e.url || null }; }),
       /* each Journal post's own prompts (from the Tuesday email), newest posts first, for the last three weeks */
       journal_art: (D.mjPrompts || []).filter((m) => m.journal && (m.status === "open" || Date.now() - P.parseTs(m.date + "T12:00:00Z") < 21 * 864e5))
         .map((m) => ({ ref: m.ref, date: m.date, journal: m.journal, post_title: m.post_title || m.slug, role: m.role, look: m.look, for: m.for, prompt: m.prompt, status: m.status }))
@@ -845,7 +848,7 @@ input[type="time"].field { width: auto }
   }
 
   async function loadAll() {
-    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats, mjp, rev] = await Promise.all([
+    const [defaults, s, c, cat, hist, st, prev, secrets, an, music, ex, fol, qs, ms, feats, mjp, rev, pap] = await Promise.all([
       D.defaults ? D.defaults : readJSON("studio/defaults.json", {}),
       readJSON("data/settings.json", {}), readJSON("data/controls.json", {}),
       readJSON("data/catalog.json", { account: {}, media: [] }), readJSON("data/history.json", []),
@@ -855,9 +858,9 @@ input[type="time"].field { width: auto }
       gh("GET", `${R()}/contents/music?ref=main`, undefined, { allow404: true }).catch(() => null),
       readJSON("data/export.json", {}), readJSON("data/follows.json", {}), readJSON("data/quotes.json", []),
       readJSON("data/music_styles.json", { styles: [] }), readJSON("data/features.json", []), readJSON("data/mj_prompts.json", []),
-      readJSON("data/review_latest.json", null),
+      readJSON("data/review_latest.json", null), readJSON("data/papers.json", { papers: {} }),
     ]);
-    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [], mjPrompts: Array.isArray(mjp) ? mjp : [], review: rev && rev.date ? rev : null });
+    Object.assign(D, { defaults, settings: s, controls: c, catalog: cat, history: hist, status: st, previews: prev, analysis: an, export: ex, follows: fol, quotes: qs, musicStyles: ((ms && ms.styles) || []).map((x) => x.key).filter(Boolean), features: Array.isArray(feats) ? feats : [], mjPrompts: Array.isArray(mjp) ? mjp : [], review: rev && rev.date ? rev : null, papers: (pap && pap.papers) || {} });
     D.music = Array.isArray(music) ? music.filter((f) => /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map((f) => ({ name: f.name, sha: f.sha, size: f.size })) : [];
     D.secrets = {};
     for (const x of secrets.secrets || []) D.secrets[x.name] = x;
@@ -1688,6 +1691,16 @@ function viewPosted() {
 
 /* ---------- this week: the Monday review, to act on from the phone ---------- */
 const CLAUDE_PROJECT = "https://claude.ai/project/01a15980-6a1c-730c-9ba7-4096420c1c78";
+function wkPaper(p, mode) {  /* PDF first, else the free full text, always the paper's page; mode "bare": links only, "flush": no indent */
+  if (!p) return "";
+  const l = [];
+  if (p.pdf) l.push(`<a href="${h(p.pdf)}" target="_blank" rel="noopener"><b>PDF</b></a>`);
+  else if (p.free_url) l.push(`<a href="${h(p.free_url)}" target="_blank" rel="noopener"><b>Free full text</b></a>`);
+  if (p.url) l.push(`<a href="${h(p.url)}" target="_blank" rel="noopener">Paper page</a>`);
+  if (!p.pdf && !p.free_url) l.push(p.doi ? "no free copy found" : "link not found yet");
+  if (mode === "bare") return `<div class="s" style="margin-top:6px">${l.join(" · ")}</div>`;
+  return `<div class="s" style="margin:4px 0 0 ${mode === "flush" ? 0 : 28}px">${h(p.ref)} ${h(p.cite || "")}: ${l.join(" · ")}</div>`;
+}
 function wkRef(r) { return `<span style="display:inline-block;min-width:28px;padding-right:6px;font-weight:700;color:var(--accent,#9E4024)">${h(r)}</span>`; }
 function wkCopy(text, label) { return `<button class="btn" data-act="copy" data-text="${h(text)}" style="margin-top:8px">${label || "Copy"}</button>`; }
 function viewWeek() {
@@ -1717,8 +1730,9 @@ function viewWeek() {
   }).join(""));
   out += sec("YOUR DIARY", (r.diary || []).length ? `<div class="list">${r.diary.map((q) => `<div class="row"><div class="txt"><div class="t" style="font-weight:400">${wkRef(q.ref)}${h(q.question)}</div></div></div>`).join("")}</div>
     <p class="note">Answer any in the Claude chat ("D2: ..."), rough is perfect. Next week's videos are written from them.</p>` : "");
+  const pap = {}; for (const p of r.papers || []) pap[p.ref] = p;
   out += sec("THIS WEEK'S TRIAL REELS", (r.trials || []).length ? `<div class="list">${r.trials.map((t) => `<div class="row"><div class="txt"><div class="t">${wkRef(t.ref)}${t.link ? `<a href="${h(t.link)}" target="_blank" rel="noopener">${h(t.title)}</a>` : h(t.title)}</div>
-      <div class="s" style="margin-left:28px">${h(t.kind || "")}${t.views != null ? ` · ${Number(t.views).toLocaleString()} views` : ""}</div></div>
+      <div class="s" style="margin-left:28px">${h(t.kind || "")}${t.views != null ? ` · ${Number(t.views).toLocaleString()} views` : ""}</div>${wkPaper(pap[t.paper])}</div>
       ${t.variant_media_id ? `<input type="number" min="0" step="1" inputmode="numeric" placeholder="follows" value="${t.follows != null ? h(String(t.follows)) : ""}" data-act="follows" data-id="${h(t.variant_media_id)}" aria-label="Follows for ${h(t.ref)}" class="field" style="width:84px">` : ""}</div>`).join("")}</div>
     <p class="note">Follows come from each reel's insights on Instagram. They're the number that tells us what makes people stay.</p>` : "");
   out += sec("FOR YOUR FOLLOWERS, ONLY IF YOU SAY YES", (r.features || []).length ? `<div class="list">${r.features.map((f) => `<div class="row"><div class="txt"><div class="t">${wkRef(f.ref)}${h(f.title || "A trial reel that did well")}</div>
@@ -1735,7 +1749,9 @@ function viewWeek() {
   out += sec("COLLAB DMS TO SEND", (r.collabs || []).map((c) => `<div class="panel" style="display:block">${wkRef(c.ref)}<a href="https://www.instagram.com/${h(c.username)}/" target="_blank" rel="noopener"><b>@${h(c.username)}</b></a>${c.followers ? `<span class="s"> · ${Number(c.followers).toLocaleString()} followers</span>` : ""}
       ${c.why ? `<div class="s" style="margin-top:4px">${h(c.why)}</div>` : ""}<p style="margin:8px 0 0">${h(c.pitch || "")}</p>${wkCopy(c.pitch || "", "Copy DM")} <a class="btn" href="https://www.instagram.com/${h(c.username)}/" target="_blank" rel="noopener" style="margin-top:8px">Open profile</a></div>`).join(""));
   out += sec("BLOG POSTS TO PICK", (r.blogs || []).map((b) => `<div class="panel" style="display:block">${wkRef(b.ref)}<b>${h(b.title)}</b><div class="s" style="margin-top:4px">${h(b.pitch || "")}</div>
+      ${(b.paper_refs || []).map((x) => wkPaper(pap[x], "flush")).join("")}
       ${(b.questions || []).map((q) => `<div class="s">&middot; ${h(q)}</div>`).join("")}</div>`).join("") + ((r.blogs || []).length ? `<p class="note">Pick in the Claude chat ("blog B1 B3") and answer any questions; drafts come Tuesday.</p>` : ""));
+  out += sec("THE PAPERS BEHIND THIS WEEK", (r.papers || []).map((p) => `<div class="panel" style="display:block">${wkRef(p.ref)}<b>${h(p.cite || p.doi || "")}</b>${p.title ? `<div class="s" style="margin-top:4px"><i>${h(p.title)}</i></div>` : ""}${wkPaper(p, "bare")}</div>`).join(""));
   out += sec("CAPTIONS", (r.captions || []).map((c) => { const t = typeof c === "string" ? c : c.text || ""; return `<div class="panel" style="display:block"><p style="margin:0">${h(t)}</p>${wkCopy(t)}</div>`; }).join(""));
   if (r.notes) out += sec("NOTES", `<p>${h(r.notes)}</p>`);
   return out + `</section>`;
