@@ -281,6 +281,7 @@ input[type="time"].field { width: auto }
   function quoteStatus(m, uses, s, at, base) {
     if (Number(s.quote_every || 0) <= 0) return { ...base, reason: "Quote reels are off" };
     if (m.excluded) return { ...base, reason: "Omitted" };
+    if (m.hold === "journal") return { ...base, reason: "Waiting for its Journal post" };
     if (base.uses >= base.cap) return { ...base, reason: `All ${base.cap} hooks posted` };
     if (uses.length) {
       const cool = Math.max(...uses) + (base.winner ? 1 : Number(s.quote_cooldown_days || 7)) * DAY;
@@ -741,13 +742,17 @@ input[type="time"].field { width: auto }
     if (!r) return null;
     const byId = {}; for (const p of D.history || []) byId[p.id] = p;
     const fol = D.follows || {};
-    const mj = {}; for (const m of D.mjPrompts || []) if (m.date === r.date) mj[m.ref] = m;
+    const mj = {}; for (const m of D.mjPrompts || []) if (m.date === r.date && !m.journal) mj[m.ref] = m;
     const feats = {}; for (const f of D.features || []) feats[f.id] = f;
     return { ...r,
       trials: (r.trials || []).map((t) => { const p = byId[t.history_id] || {}; const e = fol[p.variant_media_id] || {};
         return { ...t, views: p.variant_views != null ? p.variant_views : t.views, variant_media_id: p.variant_media_id || null, follows: e.follows != null ? e.follows : null }; }),
       prompts: (r.prompts || []).map((m) => ({ ...m, status: (mj[m.ref] || {}).status || "open" })),
-      features: (r.features || []).map((f) => ({ ...f, status: (feats[f.id] || {}).status || f.status || "queued" })) };
+      features: (r.features || []).map((f) => ({ ...f, status: (feats[f.id] || {}).status || f.status || "proposed" })),
+      /* each Journal post's own prompts (from the Tuesday email), newest posts first, for the last three weeks */
+      journal_art: (D.mjPrompts || []).filter((m) => m.journal && (m.status === "open" || Date.now() - P.parseTs(m.date + "T12:00:00Z") < 21 * 864e5))
+        .map((m) => ({ ref: m.ref, date: m.date, journal: m.journal, post_title: m.post_title || m.slug, role: m.role, look: m.look, for: m.for, prompt: m.prompt, status: m.status }))
+        .sort((a, b) => (b.date || "").localeCompare(a.date || "") || a.ref.localeCompare(b.ref, undefined, { numeric: true })) };
   }
   const utf8b64 = (s) => window.TRS_B64.toB64(new TextEncoder().encode(s));
 
@@ -823,7 +828,7 @@ input[type="time"].field { width: auto }
         timestamp: q.added_at || null, views: null, available: 1, is_variant: 0, analyzed: true, has_speech: false, has_text: false,
         excluded: c.excluded ? 1 : 0, auto_excluded: false, priority: c.priority ?? null, variants_override: c.variants_override || null,
         licensed: false, qtype: q.type || "quote", credit: q.credit || null, evidence: q.evidence || null, cite: q.cite || null,
-        cited_in: q.cited_in || null, eyebrow: q.eyebrow || null, implication: q.implication || null };
+        cited_in: q.cited_in || null, eyebrow: q.eyebrow || null, implication: q.implication || null, journal: q.journal || null, hold: q.hold || null };
     });
   }
 
@@ -920,7 +925,7 @@ input[type="time"].field { width: auto }
                instagram: { connected: !!ig, days_left: days }, claude_key: !!D.secrets.ANTHROPIC_API_KEY,
                agentmail_key: !!D.secrets.AGENTMAIL_API_KEY, journal_site: !!(D.secrets.JOURNAL_API_URL && D.secrets.JOURNAL_API_KEY), journal_url_set: !!D.secrets.JOURNAL_API_URL, journal_key_set: !!D.secrets.JOURNAL_API_KEY,
                fb_token: !!D.secrets.FB_ACCESS_TOKEN, fb: D.status.fb || null,
-               art_prompts: (D.mjPrompts || []).filter((m) => m.status === "open").slice(-8).map((m) => ({ ref: m.ref, date: m.date, look: m.look, for: m.for })),
+               art_prompts: (D.mjPrompts || []).filter((m) => m.status === "open" && !m.journal).slice(-8).map((m) => ({ ref: m.ref, date: m.date, look: m.look, for: m.for })),
                review: weekReview(),
                fb_days_left: D.secrets.FB_ACCESS_TOKEN ? Math.max(0, 60 - Math.floor((now - P.parseTs(D.secrets.FB_ACCESS_TOKEN.updated_at)) / 864e5)) : null,
                today: { posted: done, planned: slots.length, next: next ? new Date(next).toISOString() : null },
@@ -1014,6 +1019,17 @@ input[type="time"].field { width: auto }
         if (m) {
           m.status = "uploaded"; m.image = id; m.uploaded_at = new Date().toISOString();
           await writeJSON("data/mj_prompts.json", prompts, `Dashboard: art for ${ref}`);
+          if (m.slug && m.file && /^[\w.\-]+$/.test(m.file)) {
+            /* a Journal post's hero or inline image: replaces that file in the post's folder; a post already on the site
+               is sent again with it */
+            await writeBinary(`journal/${m.slug}/${m.file}`, jpg, `Dashboard: ${m.file} for ${m.journal}`);
+            const j = await readJSON("data/journal.json", { posts: [] });
+            const post = (j.posts || []).find((x) => x.id === m.journal);
+            if (post && ["pushed", "approved", "published"].includes(post.status)) {
+              post.changed_since_push = true;
+              await writeJSON("data/journal.json", j, `Dashboard: new art for ${m.journal}`);
+            }
+          }
           if (m.quote_id) {
             const quotes = await readJSON("data/quotes.json", []);
             const q = quotes.find((x) => x.id === m.quote_id);
@@ -1062,8 +1078,17 @@ input[type="time"].field { width: auto }
       return { ok: true };
     }
     if (path === "/api/features/cancel" && method === "POST") {
-      const feats = (await readJSON("data/features.json", [])).map((f) => (f.id === body.id && f.status === "queued" ? { ...f, status: "cancelled" } : f));
+      const feats = (await readJSON("data/features.json", [])).map((f) => (f.id === body.id && (f.status === "queued" || f.status === "proposed") ? { ...f, status: "cancelled" } : f));
       await writeJSON("data/features.json", feats, "Dashboard: cancel a reel");
+      D.features = feats;
+      return { ok: true };
+    }
+    if (path === "/api/features/approve" && method === "POST") {
+      /* his yes: a proposed reel goes to his followers at its time, or now if that passed (mirrors operator.post_feature) */
+      const nowIso = new Date().toISOString().replace(/\.\d+Z$/, "+00:00");
+      const feats = (await readJSON("data/features.json", [])).map((f) => (f.id === body.id && f.status === "proposed"
+        ? { ...f, status: "queued", approved_at: nowIso, at: P.parseTs(f.at) < Date.now() ? nowIso : f.at } : f));
+      await writeJSON("data/features.json", feats.sort((a, b) => P.parseTs(a.at) - P.parseTs(b.at)), "Dashboard: post a reel to followers");
       D.features = feats;
       return { ok: true };
     }
@@ -1629,8 +1654,8 @@ function viewPosted() {
   if (feats.length) {
     html += `<div class="sec">THE WEEK'S BEST, AS REELS</div><div class="list">` + feats.slice().reverse().map((f) => `<div class="row"><div class="txt">
       <div class="t">${h((f.title || "A trial reel that did well").slice(0, 70))}</div>
-      <div class="s">${f.status === "queued" ? "Goes out " + h(fmtDate(f.at)) : f.status === "posted" ? "Shared " + h(fmtDate(f.posted_at || f.at)) + (f.reel_views != null ? `, ${h(num(f.reel_views))} views as a reel` : "") : h(f.status)}. Trial: ${h(num(f.trial_views || 0))} views. ${h(f.caption_style || "")} caption, ${h(f.tag_set || "")} hashtags${(f.collaborators || []).length ? ", with @" + f.collaborators.map(h).join(", @") : ""}</div></div>
-      ${f.status === "queued" ? `<button class="mini" data-act="unfeature" data-id="${h(f.id)}" aria-label="Don't post this one">${I.x}</button>` : ""}</div>`).join("") + `</div><p class="note">Each Monday the review picks the top 5 trial reels from two weeks before and shares them as regular reels, one a day, testing captions and hashtags. Tap the x to keep one from going out.</p>`;
+      <div class="s">${f.status === "proposed" ? "Waiting for your yes, for " + h(fmtDate(f.at)) : f.status === "queued" ? "Goes out " + h(fmtDate(f.at)) : f.status === "posted" ? "Shared " + h(fmtDate(f.posted_at || f.at)) + (f.reel_views != null ? `, ${h(num(f.reel_views))} views as a reel` : "") : h(f.status)}. Trial: ${h(num(f.trial_views || 0))} views. ${h(f.caption_style || "")} caption, ${h(f.tag_set || "")} hashtags${(f.collaborators || []).length ? ", with @" + f.collaborators.map(h).join(", @") : ""}</div></div>
+      ${f.status === "proposed" ? `<button class="btn" data-act="approve-feature" data-id="${h(f.id)}" style="margin-right:6px">Post</button>` : ""}${f.status === "queued" || f.status === "proposed" ? `<button class="mini" data-act="unfeature" data-id="${h(f.id)}" aria-label="Don't post this one">${I.x}</button>` : ""}</div>`).join("") + `</div><p class="note">Each Monday the review can propose original trial reels that did well for your followers. Nothing goes to them unless you tap Post (or reply "post F1"). The x drops one.</p>`;
   }
   if (r.per_reel.length) {
     html += `<div class="sec">BY REEL</div><div class="list">` + r.per_reel.map((x) => {
@@ -1663,7 +1688,7 @@ function viewPosted() {
 
 /* ---------- this week: the Monday review, to act on from the phone ---------- */
 const CLAUDE_PROJECT = "https://claude.ai/project/01a15980-6a1c-730c-9ba7-4096420c1c78";
-function wkRef(r) { return `<span style="display:inline-block;min-width:28px;font-weight:700;color:var(--accent,#9E4024)">${h(r)}</span>`; }
+function wkRef(r) { return `<span style="display:inline-block;min-width:28px;padding-right:6px;font-weight:700;color:var(--accent,#9E4024)">${h(r)}</span>`; }
 function wkCopy(text, label) { return `<button class="btn" data-act="copy" data-text="${h(text)}" style="margin-top:8px">${label || "Copy"}</button>`; }
 function viewWeek() {
   const r = ST.state.review;
@@ -1696,12 +1721,17 @@ function viewWeek() {
       <div class="s" style="margin-left:28px">${h(t.kind || "")}${t.views != null ? ` · ${Number(t.views).toLocaleString()} views` : ""}</div></div>
       ${t.variant_media_id ? `<input type="number" min="0" step="1" inputmode="numeric" placeholder="follows" value="${t.follows != null ? h(String(t.follows)) : ""}" data-act="follows" data-id="${h(t.variant_media_id)}" aria-label="Follows for ${h(t.ref)}" class="field" style="width:84px">` : ""}</div>`).join("")}</div>
     <p class="note">Follows come from each reel's insights on Instagram. They're the number that tells us what makes people stay.</p>` : "");
-  out += sec("GOING OUT TO YOUR FOLLOWERS", (r.features || []).length ? `<div class="list">${r.features.map((f) => `<div class="row"><div class="txt"><div class="t">${wkRef(f.ref)}${h(f.title || "A trial reel that did well")}</div>
-      <div class="s" style="margin-left:28px">${h(fmtTime(f.at))}${f.status !== "queued" ? " · " + h(f.status) : ""}</div><div class="s" style="margin-left:28px"><i>${h((f.caption || "").slice(0, 220))}</i></div></div>
-      ${f.status === "queued" ? `<button class="mini" data-act="unfeature" data-id="${h(f.id)}" aria-label="Don't post ${h(f.ref)}">${I.x}</button>` : ""}</div>`).join("")}</div>` : "");
+  out += sec("FOR YOUR FOLLOWERS, ONLY IF YOU SAY YES", (r.features || []).length ? `<div class="list">${r.features.map((f) => `<div class="row"><div class="txt"><div class="t">${wkRef(f.ref)}${h(f.title || "A trial reel that did well")}</div>
+      <div class="s" style="margin-left:28px">${h(fmtTime(f.at))}${f.status === "queued" ? " · you said yes" : f.status !== "proposed" ? " · " + h(f.status) : ""}</div><div class="s" style="margin-left:28px"><i>${h((f.caption || "").slice(0, 220))}</i></div></div>
+      ${f.status === "proposed" ? `<button class="btn" data-act="approve-feature" data-id="${h(f.id)}" style="margin-right:6px" ${DEMO ? "disabled" : ""}>Post</button>` : ""}${f.status === "queued" || f.status === "proposed" ? `<button class="mini" data-act="unfeature" data-id="${h(f.id)}" aria-label="Don't post ${h(f.ref)}">${I.x}</button>` : ""}</div>`).join("")}</div>
+    <p class="note">Nothing here reaches your followers unless you tap Post.</p>` : "");
   out += sec("MIDJOURNEY PROMPTS", (r.prompts || []).map((m) => `<div class="panel" style="display:block">${wkRef(m.ref)}<b>${h(m.look || "")}</b>${m.for ? `<span class="s">: ${h(m.for)}</span>` : ""}
       <div style="margin-top:8px;padding:10px;border-radius:8px;background:#1F1C18;color:#F3EBDD;font:13px/1.5 Menlo,Consolas,monospace;word-break:break-word">${h(m.prompt)}</div>
       ${wkCopy(m.prompt)} ${m.status === "uploaded" ? `<span class="s">&nbsp;Art saved</span>` : `<label class="btn" style="margin-top:8px">Upload art<input type="file" accept="image/*" data-act="upload-art" data-ref="${h(m.ref)}" data-date="${h(m.date || r.date)}" style="display:none" ${DEMO ? "disabled" : ""}></label>`}</div>`).join(""));
+  const ja = r.journal_art || [];
+  out += sec("JOURNAL ART", ja.map((m, i) => `${i === 0 || ja[i - 1].journal !== m.journal ? `<p style="margin:14px 0 6px"><b>${h(m.journal)}</b> ${h(m.post_title || "")}</p>` : ""}<div class="panel" style="display:block">${wkRef(m.ref)}<b>${h({ hero: "Hero, at the top", inline: "Inside the post", reel: "Trial reel" }[m.role] || m.role || "")}</b>${m.for ? `<span class="s">: ${h(m.for)}</span>` : ""}${m.look ? `<span class="s"> · ${h(m.look)}</span>` : ""}
+      <div style="margin-top:8px;padding:10px;border-radius:8px;background:#1F1C18;color:#F3EBDD;font:13px/1.5 Menlo,Consolas,monospace;word-break:break-word">${h(m.prompt)}</div>
+      ${wkCopy(m.prompt)} ${m.status === "uploaded" ? `<span class="s">&nbsp;Art saved</span>` : `<label class="btn" style="margin-top:8px">Upload art<input type="file" accept="image/*" data-act="upload-art" data-ref="${h(m.ref)}" data-date="${h(m.date)}" style="display:none" ${DEMO ? "disabled" : ""}></label>`}</div>`).join("") + (ja.length ? `<p class="note">Each post's own prompts. Your upload goes into the post (and onto the site, even once it's live) and onto its trial reels.</p>` : ""));
   out += sec("COLLAB DMS TO SEND", (r.collabs || []).map((c) => `<div class="panel" style="display:block">${wkRef(c.ref)}<a href="https://www.instagram.com/${h(c.username)}/" target="_blank" rel="noopener"><b>@${h(c.username)}</b></a>${c.followers ? `<span class="s"> · ${Number(c.followers).toLocaleString()} followers</span>` : ""}
       ${c.why ? `<div class="s" style="margin-top:4px">${h(c.why)}</div>` : ""}<p style="margin:8px 0 0">${h(c.pitch || "")}</p>${wkCopy(c.pitch || "", "Copy DM")} <a class="btn" href="https://www.instagram.com/${h(c.username)}/" target="_blank" rel="noopener" style="margin-top:8px">Open profile</a></div>`).join(""));
   out += sec("BLOG POSTS TO PICK", (r.blogs || []).map((b) => `<div class="panel" style="display:block">${wkRef(b.ref)}<b>${h(b.title)}</b><div class="s" style="margin-top:4px">${h(b.pitch || "")}</div>
@@ -2060,6 +2090,11 @@ document.addEventListener("change", async (e) => {
     await api("POST", "/api/features/cancel", { id: el.dataset.id });
     await api("GET", "/api/state").then((d) => (ST.state = d)); render();
   }
+  if (act === "approve-feature") {
+    try { await api("POST", "/api/features/approve", { id: el.dataset.id }); toast("Yes. It goes to your followers at its time"); }
+    catch (err) { toast(err.message); }
+    await api("GET", "/api/state").then((d) => (ST.state = d)); render();
+  }
   if (act === "mstyles") await saveSetting("music_styles", el.value.split(",").map((x) => x.trim()).filter(Boolean));
   if (act === "mstyle") {
     const all = ST.state.music_styles || [], cur = (ST.state.settings.music_styles || []).filter((x) => all.includes(x));
@@ -2080,7 +2115,7 @@ document.addEventListener("change", async (e) => {
         if (el.dataset.ref) { fd.append("ref", el.dataset.ref); fd.append("date", el.dataset.date || ""); }
         await api("POST", "/api/art", fd);
       }
-      toast(el.dataset.ref ? `Saved. ${el.dataset.ref}'s line uses it from its next reel` : el.files.length > 1 ? "Added to the library" : "Added to the library");
+      toast(/^J\d+-M\d+$/.test(el.dataset.ref || "") ? `Saved to ${el.dataset.ref.split("-")[0]}` : el.dataset.ref ? `Saved. ${el.dataset.ref}'s line uses it from its next reel` : "Added to the library");
       await load(true);
     } catch (err) { toast(err.message); }
   }
