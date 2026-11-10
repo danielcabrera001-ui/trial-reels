@@ -282,6 +282,7 @@ input[type="time"].field { width: auto }
     if (Number(s.quote_every || 0) <= 0) return { ...base, reason: "Quote reels are off" };
     if (m.excluded) return { ...base, reason: "Omitted" };
     if (m.hold === "journal") return { ...base, reason: "Waiting for its Journal post" };
+    if (m.hold === "experiment") return { ...base, reason: "Only posted in an experiment" };
     if (base.uses >= base.cap) return { ...base, reason: `All ${base.cap} hooks posted` };
     if (uses.length) {
       const cool = Math.max(...uses) + (base.winner ? 1 : Number(s.quote_cooldown_days || 7)) * DAY;
